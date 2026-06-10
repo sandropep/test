@@ -58,10 +58,8 @@ export default function MyStats() {
     if (!data) return;
 
     const now = new Date();
-    const weekAgo = new Date(now);
-    weekAgo.setDate(now.getDate() - 7);
-    const monthAgo = new Date(now);
-    monthAgo.setDate(now.getDate() - 30);
+    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
     const total = data.length;
     const avgScore = total > 0

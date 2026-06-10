@@ -112,12 +112,19 @@ export default function ManagePage() {
       password: checkerPassword,
     });
 
-    // Restore admin session immediately regardless of outcome
+    // Restore admin session — signUp auto-signs-in the new user so we must restore
     if (adminSession) {
-      await supabase.auth.setSession({
+      const { error: restoreError } = await supabase.auth.setSession({
         access_token: adminSession.access_token,
         refresh_token: adminSession.refresh_token,
       });
+      if (restoreError) {
+        await supabase.auth.signOut();
+        if (Platform.OS === 'web') window.alert('ჩეკერი შეიქმნა, მაგრამ სესია გათიშა — გთხოვთ შეხვიდეთ ხელახლა');
+        else Alert.alert('გაფრთხილება', 'ჩეკერი შეიქმნა, მაგრამ სესია გათიშა — გთხოვთ შეხვიდეთ ხელახლა');
+        setCheckerSaving(false);
+        return;
+      }
     }
 
     if (authError) {

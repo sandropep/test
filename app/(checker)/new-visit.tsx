@@ -141,10 +141,24 @@ export default function NewVisit() {
     }
 
     setSubmitting(true);
+    const uploadedPaths: string[] = [];
     try {
       if (!userId) throw new Error('Not authenticated');
 
-      // Insert visit — score_percent and category computed by DB trigger
+      // Step 1: upload all photos before touching the DB
+      const timestamp = Date.now();
+      const safeName = checkerName.replace(/[^a-zA-Z0-9_-]/g, '_') || 'checker';
+      for (const pos of POSITIONS) {
+        const uri = photos[pos]!;
+        const storagePath = `${safeName}/${selectedShop.shop_number}/${POSITION_PATH[pos]}_${timestamp}.jpg`;
+        const base64 = await readImageAsBase64(uri);
+        const { error: uploadError } = await supabase.storage
+          .from('photos').upload(storagePath, decode(base64), { contentType: 'image/jpeg' });
+        if (uploadError) throw uploadError;
+        uploadedPaths.push(storagePath);
+      }
+
+      // Step 2: insert visit
       const { data: visit, error: visitError } = await supabase
         .from('visits')
         .insert({
@@ -157,35 +171,25 @@ export default function NewVisit() {
         })
         .select('id')
         .single();
-
       if (visitError) throw visitError;
 
-      // Upload each photo then record it
-      const timestamp = Date.now();
-      for (const pos of POSITIONS) {
-        const uri = photos[pos]!;
-        const safeName = checkerName.replace(/[^a-zA-Z0-9_-]/g, '_') || 'checker';
-        const storagePath = `${safeName}/${selectedShop.shop_number}/${POSITION_PATH[pos]}_${timestamp}.jpg`;
-
-        const base64 = await readImageAsBase64(uri);
-
-        const { error: uploadError } = await supabase.storage
-          .from('photos')
-          .upload(storagePath, decode(base64), { contentType: 'image/jpeg' });
-
-        if (uploadError) throw uploadError;
-
-        const { error: photoError } = await supabase
-          .from('photos')
-          .insert({ visit_id: visit.id, position: pos, storage_path: storagePath });
-
-        if (photoError) throw photoError;
+      // Step 3: record all photos in one batch
+      const { error: photosError } = await supabase.from('photos').insert(
+        POSITIONS.map((pos, i) => ({ visit_id: visit.id, position: pos, storage_path: uploadedPaths[i] }))
+      );
+      if (photosError) {
+        await supabase.from('visits').delete().eq('id', visit.id);
+        throw photosError;
       }
 
       clearForm();
       if (Platform.OS === 'web') window.alert('ვიზიტი შენახულია!');
       else Alert.alert('წარმატება', 'ვიზიტი შენახულია!');
     } catch (err: any) {
+      // Clean up any files already uploaded if the operation failed
+      if (uploadedPaths.length) {
+        await supabase.storage.from('photos').remove(uploadedPaths);
+      }
       if (Platform.OS === 'web') window.alert(err.message ?? 'სცადეთ თავიდან');
       else Alert.alert('შეცდომა', err.message ?? 'სცადეთ თავიდან');
     } finally {

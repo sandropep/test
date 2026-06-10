@@ -238,12 +238,13 @@ export default function VisitDetail() {
 
         if (uploadError) throw uploadError;
 
-        await supabase.storage.from('photos').remove([photo.storagePath]);
-
+        // Update DB before deleting old file — if DB fails, old file is still intact
         const { error: photoError } = await supabase
           .from('photos').update({ storage_path: newPath }).eq('id', photo.id);
 
         if (photoError) throw photoError;
+
+        await supabase.storage.from('photos').remove([photo.storagePath]);
       }
 
       if (Platform.OS === 'web') {
