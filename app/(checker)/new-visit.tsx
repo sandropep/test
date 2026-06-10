@@ -1,20 +1,27 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  ScrollView,
-  StyleSheet,
-  Alert,
-  Image,
-  ActivityIndicator,
+  View, Text, TextInput, TouchableOpacity, ScrollView,
+  StyleSheet, Alert, Image, ActivityIndicator, Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { decode } from 'base64-arraybuffer';
 import { supabase } from '../../lib/supabase';
+
+async function readImageAsBase64(uri: string): Promise<string> {
+  if (Platform.OS === 'web') {
+    const response = await fetch(uri);
+    const blob = await response.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve((reader.result as string).split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+  return FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+}
 
 const POSITIONS = ['საწყობი', 'მაცივარი', 'თარო'] as const;
 type Position = typeof POSITIONS[number];
@@ -91,34 +98,26 @@ export default function NewVisit() {
   }, [shopQuery]);
 
   async function pickPhoto(position: Position) {
+    if (Platform.OS === 'web') {
+      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 0.75 });
+      if (!result.canceled) setPhotos(prev => ({ ...prev, [position]: result.assets[0].uri }));
+      return;
+    }
     Alert.alert('ფოტო', 'აირჩიეთ წყარო', [
       {
         text: 'კამერა',
         onPress: async () => {
           const permission = await ImagePicker.requestCameraPermissionsAsync();
-          if (!permission.granted) {
-            Alert.alert('შეცდომა', 'კამერაზე წვდომა საჭიროა');
-            return;
-          }
-          const result = await ImagePicker.launchCameraAsync({
-            mediaTypes: 'images',
-            quality: 0.75,
-          });
-          if (!result.canceled) {
-            setPhotos(prev => ({ ...prev, [position]: result.assets[0].uri }));
-          }
+          if (!permission.granted) { Alert.alert('შეცდომა', 'კამერაზე წვდომა საჭიროა'); return; }
+          const result = await ImagePicker.launchCameraAsync({ mediaTypes: 'images', quality: 0.75 });
+          if (!result.canceled) setPhotos(prev => ({ ...prev, [position]: result.assets[0].uri }));
         },
       },
       {
         text: 'გალერეა',
         onPress: async () => {
-          const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: 'images',
-            quality: 0.75,
-          });
-          if (!result.canceled) {
-            setPhotos(prev => ({ ...prev, [position]: result.assets[0].uri }));
-          }
+          const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 0.75 });
+          if (!result.canceled) setPhotos(prev => ({ ...prev, [position]: result.assets[0].uri }));
         },
       },
       { text: 'გაუქმება', style: 'cancel' },
@@ -169,9 +168,7 @@ export default function NewVisit() {
         const safeName = checkerName.replace(/[^a-zA-Z0-9_-]/g, '_') || 'checker';
         const storagePath = `${safeName}/${selectedShop.shop_number}/${POSITION_PATH[pos]}_${timestamp}.jpg`;
 
-        const base64 = await FileSystem.readAsStringAsync(uri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
+        const base64 = await readImageAsBase64(uri);
 
         const { error: uploadError } = await supabase.storage
           .from('photos')

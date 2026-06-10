@@ -1,13 +1,27 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Image, Alert, ActivityIndicator,
+  TextInput, Image, Alert, ActivityIndicator, Platform,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { decode } from 'base64-arraybuffer';
 import { supabase } from '../../../lib/supabase';
+
+async function readImageAsBase64(uri: string): Promise<string> {
+  if (Platform.OS === 'web') {
+    const response = await fetch(uri);
+    const blob = await response.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve((reader.result as string).split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+  return FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+}
 
 const POSITIONS = ['საწყობი', 'მაცივარი', 'თარო'] as const;
 type Position = typeof POSITIONS[number];
@@ -140,6 +154,14 @@ export default function VisitDetail() {
   }, [load]);
 
   async function replacePhoto(position: Position) {
+    if (Platform.OS === 'web') {
+      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 0.75 });
+      if (!result.canceled) {
+        const uri = result.assets[0].uri;
+        setPhotos(prev => ({ ...prev, [position]: { ...prev[position]!, localUri: uri, displayUri: uri } }));
+      }
+      return;
+    }
     Alert.alert('ფოტო', 'აირჩიეთ წყარო', [
       {
         text: 'კამერა',
@@ -149,10 +171,7 @@ export default function VisitDetail() {
           const result = await ImagePicker.launchCameraAsync({ mediaTypes: 'images', quality: 0.75 });
           if (!result.canceled) {
             const uri = result.assets[0].uri;
-            setPhotos(prev => ({
-              ...prev,
-              [position]: { ...prev[position]!, localUri: uri, displayUri: uri },
-            }));
+            setPhotos(prev => ({ ...prev, [position]: { ...prev[position]!, localUri: uri, displayUri: uri } }));
           }
         },
       },
@@ -162,10 +181,7 @@ export default function VisitDetail() {
           const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 0.75 });
           if (!result.canceled) {
             const uri = result.assets[0].uri;
-            setPhotos(prev => ({
-              ...prev,
-              [position]: { ...prev[position]!, localUri: uri, displayUri: uri },
-            }));
+            setPhotos(prev => ({ ...prev, [position]: { ...prev[position]!, localUri: uri, displayUri: uri } }));
           }
         },
       },
@@ -214,9 +230,7 @@ export default function VisitDetail() {
         if (!photo?.localUri) continue;
 
         const newPath = `${safeName}/${selectedShop.shop_number}/${POSITION_PATH[pos]}_${timestamp}.jpg`;
-        const base64 = await FileSystem.readAsStringAsync(photo.localUri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
+        const base64 = await readImageAsBase64(photo.localUri);
 
         const { error: uploadError } = await supabase.storage
           .from('photos').upload(newPath, decode(base64), { contentType: 'image/jpeg' });
