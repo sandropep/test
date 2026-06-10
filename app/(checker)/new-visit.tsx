@@ -1,0 +1,444 @@
+import { useState, useEffect, useCallback } from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  ScrollView,
+  StyleSheet,
+  Alert,
+  Image,
+  ActivityIndicator,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system';
+import { decode } from 'base64-arraybuffer';
+import { supabase } from '../../lib/supabase';
+
+const POSITIONS = ['საწყობი', 'მაცივარი', 'თარო'] as const;
+type Position = typeof POSITIONS[number];
+type Rating = 'A' | 'B';
+
+// ASCII-safe names for storage paths
+const POSITION_PATH: Record<Position, string> = {
+  'საწყობი': 'warehouse',
+  'მაცივარი': 'fridge',
+  'თარო': 'shelf',
+};
+
+interface Shop {
+  id: string;
+  shop_number: string;
+  name: string;
+  location: string | null;
+}
+
+export default function NewVisit() {
+  const [shopQuery, setShopQuery] = useState('');
+  const [shopResults, setShopResults] = useState<Shop[]>([]);
+  const [selectedShop, setSelectedShop] = useState<Shop | null>(null);
+  const [ratings, setRatings] = useState<Partial<Record<Position, Rating>>>({});
+  const [photos, setPhotos] = useState<Partial<Record<Position, string>>>({});
+  const [notes, setNotes] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [checkerName, setCheckerName] = useState('');
+
+  const handleReset = useCallback(() => {
+    Alert.alert('გასუფთავება', 'ყველა მონაცემი წაიშლება. დარწმუნებული ხართ?', [
+      { text: 'გაუქმება', style: 'cancel' },
+      {
+        text: 'გასუფთავება',
+        style: 'destructive',
+        onPress: () => {
+          setSelectedShop(null);
+          setShopQuery('');
+          setRatings({});
+          setPhotos({});
+          setNotes('');
+        },
+      },
+    ]);
+  }, []);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return;
+      supabase
+        .from('users')
+        .select('full_name')
+        .eq('id', user.id)
+        .single()
+        .then(({ data }) => setCheckerName(data?.full_name || user.email || 'unknown'));
+    });
+  }, []);
+
+  // Debounced shop search
+  useEffect(() => {
+    if (shopQuery.length < 2) {
+      setShopResults([]);
+      return;
+    }
+    const t = setTimeout(async () => {
+      const { data } = await supabase
+        .from('shops')
+        .select('id, shop_number, name, location')
+        .or(`shop_number.ilike.%${shopQuery}%,name.ilike.%${shopQuery}%`)
+        .limit(10);
+      setShopResults(data ?? []);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [shopQuery]);
+
+  async function pickPhoto(position: Position) {
+    Alert.alert('ფოტო', 'აირჩიეთ წყარო', [
+      {
+        text: 'კამერა',
+        onPress: async () => {
+          const permission = await ImagePicker.requestCameraPermissionsAsync();
+          if (!permission.granted) {
+            Alert.alert('შეცდომა', 'კამერაზე წვდომა საჭიროა');
+            return;
+          }
+          const result = await ImagePicker.launchCameraAsync({
+            mediaTypes: 'images',
+            quality: 0.75,
+          });
+          if (!result.canceled) {
+            setPhotos(prev => ({ ...prev, [position]: result.assets[0].uri }));
+          }
+        },
+      },
+      {
+        text: 'გალერეა',
+        onPress: async () => {
+          const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: 'images',
+            quality: 0.75,
+          });
+          if (!result.canceled) {
+            setPhotos(prev => ({ ...prev, [position]: result.assets[0].uri }));
+          }
+        },
+      },
+      { text: 'გაუქმება', style: 'cancel' },
+    ]);
+  }
+
+  async function handleSubmit() {
+    if (!selectedShop) {
+      Alert.alert('შეცდომა', 'აირჩიეთ მაღაზია');
+      return;
+    }
+    for (const pos of POSITIONS) {
+      if (!ratings[pos]) {
+        Alert.alert('შეცდომა', `მონიშნეთ რეიტინგი: ${pos}`);
+        return;
+      }
+      if (!photos[pos]) {
+        Alert.alert('შეცდომა', `გადაიღეთ ფოტო: ${pos}`);
+        return;
+      }
+    }
+
+    setSubmitting(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      // Insert visit — score_percent and category computed by DB trigger
+      const { data: visit, error: visitError } = await supabase
+        .from('visits')
+        .insert({
+          shop_id: selectedShop.id,
+          checker_id: user.id,
+          warehouse_rating: ratings['საწყობი'],
+          fridge_rating: ratings['მაცივარი'],
+          shelf_rating: ratings['თარო'],
+          notes: notes.trim() || null,
+        })
+        .select('id')
+        .single();
+
+      if (visitError) throw visitError;
+
+      // Upload each photo then record it
+      const timestamp = Date.now();
+      for (const pos of POSITIONS) {
+        const uri = photos[pos]!;
+        const safeName = checkerName.replace(/[^a-zA-Z0-9_-]/g, '_') || 'checker';
+        const storagePath = `${safeName}/${selectedShop.shop_number}/${POSITION_PATH[pos]}_${timestamp}.jpg`;
+
+        const base64 = await FileSystem.readAsStringAsync(uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+
+        const { error: uploadError } = await supabase.storage
+          .from('photos')
+          .upload(storagePath, decode(base64), { contentType: 'image/jpeg' });
+
+        if (uploadError) throw uploadError;
+
+        const { error: photoError } = await supabase
+          .from('photos')
+          .insert({ visit_id: visit.id, position: pos, storage_path: storagePath });
+
+        if (photoError) throw photoError;
+      }
+
+      Alert.alert('წარმატება', 'ვიზიტი შენახულია!', [
+        {
+          text: 'OK',
+          onPress: () => {
+            setSelectedShop(null);
+            setShopQuery('');
+            setRatings({});
+            setPhotos({});
+            setNotes('');
+          },
+        },
+      ]);
+    } catch (err: any) {
+      Alert.alert('შეცდომა', err.message ?? 'სცადეთ თავიდან');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      keyboardShouldPersistTaps="handled"
+    >
+      {/* Title row with reset button */}
+      <View style={styles.titleRow}>
+        <TouchableOpacity style={styles.resetBtn} onPress={handleReset} activeOpacity={0.75}>
+          <Ionicons name="refresh-outline" size={16} color="#dc2626" />
+          <Text style={styles.resetBtnText}>გასუფთავება</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Shop selector */}
+      <Text style={styles.sectionTitle}>მაღაზია</Text>
+      {selectedShop ? (
+        <TouchableOpacity
+          style={styles.selectedShop}
+          onPress={() => { setSelectedShop(null); setShopQuery(''); }}
+        >
+          <View>
+            <Text style={styles.selectedShopPrimary}>
+              #{selectedShop.shop_number} — {selectedShop.name}
+            </Text>
+            {selectedShop.location ? (
+              <Text style={styles.selectedShopSub}>{selectedShop.location}</Text>
+            ) : null}
+          </View>
+          <Text style={styles.changeBtn}>შეცვლა</Text>
+        </TouchableOpacity>
+      ) : (
+        <View>
+          <TextInput
+            style={styles.input}
+            value={shopQuery}
+            onChangeText={setShopQuery}
+            placeholder="ნომერი ან სახელი..."
+            placeholderTextColor="#aaa"
+          />
+          {shopResults.map(shop => (
+            <TouchableOpacity
+              key={shop.id}
+              style={styles.shopRow}
+              onPress={() => {
+                setSelectedShop(shop);
+                setShopResults([]);
+                setShopQuery('');
+              }}
+            >
+              <Text style={styles.shopRowNumber}>#{shop.shop_number}</Text>
+              <Text style={styles.shopRowName}>{shop.name}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
+      {/* Ratings + Photos per position */}
+      <Text style={[styles.sectionTitle, { marginTop: 24 }]}>შეფასება და ფოტოები</Text>
+      {POSITIONS.map(pos => (
+        <View key={pos} style={styles.positionCard}>
+          <Text style={styles.positionLabel}>{pos}</Text>
+
+          <View style={styles.ratingRow}>
+            {(['A', 'B'] as Rating[]).map(r => (
+              <TouchableOpacity
+                key={r}
+                style={[styles.ratingBtn, ratings[pos] === r && styles.ratingBtnActive]}
+                onPress={() => setRatings(prev => ({ ...prev, [pos]: r }))}
+              >
+                <Text style={[styles.ratingBtnText, ratings[pos] === r && styles.ratingBtnTextActive]}>
+                  {r}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <TouchableOpacity style={styles.photoBox} onPress={() => pickPhoto(pos)}>
+            {photos[pos] ? (
+              <Image source={{ uri: photos[pos] }} style={styles.photoPreview} />
+            ) : (
+              <Text style={styles.photoBoxText}>📷  ფოტოს გადაღება</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      ))}
+
+      {/* Notes */}
+      <Text style={[styles.sectionTitle, { marginTop: 24 }]}>
+        შენიშვნა (არასავალდებულო)
+      </Text>
+      <TextInput
+        style={[styles.input, styles.notesInput]}
+        value={notes}
+        onChangeText={setNotes}
+        placeholder="დაამატეთ შენიშვნა..."
+        placeholderTextColor="#aaa"
+        multiline
+        numberOfLines={3}
+        textAlignVertical="top"
+      />
+
+      {/* Submit */}
+      <TouchableOpacity
+        style={[styles.submitBtn, submitting && styles.submitBtnDisabled]}
+        onPress={handleSubmit}
+        disabled={submitting}
+        activeOpacity={0.8}
+      >
+        {submitting ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <Text style={styles.submitBtnText}>შენახვა</Text>
+        )}
+      </TouchableOpacity>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#f0f2f5' },
+  content: { padding: 16, paddingBottom: 48 },
+
+  titleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  screenTitle: { fontSize: 22, fontWeight: '800', color: '#1a1a2e' },
+  resetBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1.5,
+    borderColor: '#dc2626',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: '#fff5f5',
+  },
+  resetBtnText: { color: '#dc2626', fontWeight: '600', fontSize: 14 },
+
+  sectionTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#888',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 8,
+  },
+
+  input: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: '#1a1a2e',
+    marginBottom: 2,
+  },
+  notesInput: { height: 88 },
+
+  shopRow: {
+    backgroundColor: '#fff',
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderBottomWidth: 1,
+    borderColor: '#f0f0f0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  shopRowNumber: { fontWeight: '700', color: '#2563eb', fontSize: 13, minWidth: 48 },
+  shopRowName: { color: '#333', fontSize: 14, flex: 1 },
+
+  selectedShop: {
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    padding: 14,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: '#2563eb',
+  },
+  selectedShopPrimary: { fontWeight: '700', color: '#1a1a2e', fontSize: 15 },
+  selectedShopSub: { color: '#888', fontSize: 13, marginTop: 2 },
+  changeBtn: { color: '#2563eb', fontSize: 13, fontWeight: '600' },
+
+  positionCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+  },
+  positionLabel: { fontSize: 15, fontWeight: '700', color: '#1a1a2e', marginBottom: 12 },
+
+  ratingRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
+  ratingBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    alignItems: 'center',
+  },
+  ratingBtnActive: { borderColor: '#2563eb', backgroundColor: '#eff6ff' },
+  ratingBtnText: { fontSize: 20, fontWeight: '800', color: '#ccc' },
+  ratingBtnTextActive: { color: '#2563eb' },
+
+  photoBox: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderStyle: 'dashed',
+    height: 110,
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  photoPreview: { width: '100%', height: '100%' },
+  photoBoxText: { color: '#999', fontSize: 14 },
+
+  submitBtn: {
+    backgroundColor: '#2563eb',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginTop: 28,
+  },
+  submitBtnDisabled: { opacity: 0.6 },
+  submitBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+});
