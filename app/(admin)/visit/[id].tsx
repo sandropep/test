@@ -89,7 +89,7 @@ export default function AdminVisitDetail() {
   useEffect(() => {
     navigation.setOptions({
       headerLeft: () => (
-        <TouchableOpacity onPress={() => router.back()} style={{ marginLeft: 8, padding: 4 }}>
+        <TouchableOpacity onPress={() => router.replace('/(admin)/visits')} style={{ marginLeft: 8, padding: 4 }}>
           <Ionicons name="arrow-back" size={24} color="#1a1a2e" />
         </TouchableOpacity>
       ),
