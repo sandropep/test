@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, Image, ActivityIndicator,
-  Alert, TouchableOpacity, Modal, StatusBar, SafeAreaView,
+  Alert, TouchableOpacity, Modal, StatusBar, SafeAreaView, TextInput, Platform,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -14,6 +14,13 @@ const CATEGORY_COLORS: Record<string, string> = {
   A: '#16a34a', B: '#2563eb', C: '#d97706', D: '#dc2626',
 };
 
+const STATUS_COLORS: Record<string, string> = {
+  pending: '#d97706', approved: '#16a34a', rejected: '#dc2626',
+};
+const STATUS_LABELS: Record<string, string> = {
+  pending: 'მოლოდინში', approved: 'დადასტურებული', rejected: 'უარყოფილი',
+};
+
 interface VisitData {
   date: string;
   warehouse_rating: string;
@@ -22,6 +29,8 @@ interface VisitData {
   score_percent: number;
   category: string;
   notes: string | null;
+  status: string;
+  rejection_note: string | null;
   shops: { shop_number: string; name: string; location: string | null } | null;
   checker: { full_name: string } | null;
 }
@@ -39,18 +48,22 @@ export default function AdminVisitDetail() {
   const [visit, setVisit] = useState<VisitData | null>(null);
   const [photos, setPhotos] = useState<PhotoData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(false);
   const [lightboxUri, setLightboxUri] = useState<string | null>(null);
   const [lightboxLabel, setLightboxLabel] = useState('');
+  const [rejectModalVisible, setRejectModalVisible] = useState(false);
+  const [rejectNoteInput, setRejectNoteInput] = useState('');
 
   const load = useCallback(async () => {
     const { data, error } = await supabase
       .from('visits')
-      .select('date, warehouse_rating, fridge_rating, shelf_rating, score_percent, category, notes, shops(shop_number, name, location), checker:checker_id(full_name)')
+      .select('*, shops(shop_number, name, location), checker:checker_id(full_name)')
       .eq('id', id)
       .single();
 
     if (error || !data) {
-      Alert.alert('შეცდომა', 'ვიზიტი ვერ მოიძებნა');
+      if (Platform.OS === 'web') window.alert('ვიზიტი ვერ მოიძებნა');
+      else Alert.alert('შეცდომა', 'ვიზიტი ვერ მოიძებნა');
       router.back();
       return;
     }
@@ -87,14 +100,42 @@ export default function AdminVisitDetail() {
     load().finally(() => setLoading(false));
   }, [load]);
 
-  function openLightbox(uri: string, label: string) {
-    setLightboxUri(uri);
-    setLightboxLabel(label);
+  async function handleApprove() {
+    setActionLoading(true);
+    try {
+      const { error } = await supabase
+        .from('visits')
+        .update({ status: 'approved', rejection_note: null })
+        .eq('id', id);
+      if (error) throw error;
+      setVisit(prev => prev ? { ...prev, status: 'approved', rejection_note: null } : prev);
+    } catch (err: any) {
+      Alert.alert('შეცდომა', err.message);
+    } finally {
+      setActionLoading(false);
+    }
   }
 
-  function closeLightbox() {
-    setLightboxUri(null);
-    setLightboxLabel('');
+  async function handleReject() {
+    if (!rejectNoteInput.trim()) {
+      Alert.alert('შეცდომა', 'შეიყვანეთ უარყოფის მიზეზი');
+      return;
+    }
+    setActionLoading(true);
+    setRejectModalVisible(false);
+    try {
+      const { error } = await supabase
+        .from('visits')
+        .update({ status: 'rejected', rejection_note: rejectNoteInput.trim() })
+        .eq('id', id);
+      if (error) throw error;
+      setVisit(prev => prev ? { ...prev, status: 'rejected', rejection_note: rejectNoteInput.trim() } : prev);
+      setRejectNoteInput('');
+    } catch (err: any) {
+      Alert.alert('შეცდომა', err.message);
+    } finally {
+      setActionLoading(false);
+    }
   }
 
   if (loading) {
@@ -114,10 +155,22 @@ export default function AdminVisitDetail() {
   };
 
   const photoMap = Object.fromEntries(photos.map(p => [p.position, p.signedUrl]));
+  const statusColor = STATUS_COLORS[visit.status] ?? '#888';
 
   return (
     <>
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+        {/* Status banner */}
+        <View style={[styles.statusBanner, { backgroundColor: statusColor + '18', borderColor: statusColor + '40' }]}>
+          <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
+          <Text style={[styles.statusText, { color: statusColor }]}>
+            {STATUS_LABELS[visit.status] ?? visit.status}
+          </Text>
+          {visit.status === 'rejected' && visit.rejection_note && (
+            <Text style={styles.statusNote}> — {visit.rejection_note}</Text>
+          )}
+        </View>
+
         {/* Header info */}
         <View style={styles.infoCard}>
           <Text style={styles.shopName}>
@@ -150,6 +203,32 @@ export default function AdminVisitDetail() {
           </View>
         </View>
 
+        {/* Action buttons */}
+        {visit.status !== 'approved' && (
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.approveBtn, actionLoading && styles.actionBtnDisabled]}
+            onPress={handleApprove}
+            disabled={actionLoading}
+          >
+            {actionLoading ? <ActivityIndicator color="#fff" size="small" /> : (
+              <>
+                <Ionicons name="checkmark-circle-outline" size={20} color="#fff" />
+                <Text style={styles.actionBtnText}>დადასტურება</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        )}
+        {visit.status !== 'rejected' && (
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.rejectBtn, actionLoading && styles.actionBtnDisabled]}
+            onPress={() => setRejectModalVisible(true)}
+            disabled={actionLoading}
+          >
+            <Ionicons name="close-circle-outline" size={20} color="#fff" />
+            <Text style={styles.actionBtnText}>უარყოფა</Text>
+          </TouchableOpacity>
+        )}
+
         {/* Positions */}
         <Text style={styles.sectionTitle}>შეფასება და ფოტოები</Text>
         {POSITIONS.map(pos => (
@@ -172,7 +251,7 @@ export default function AdminVisitDetail() {
             {photoMap[pos] ? (
               <TouchableOpacity
                 activeOpacity={0.9}
-                onPress={() => openLightbox(photoMap[pos], pos)}
+                onPress={() => { setLightboxUri(photoMap[pos]); setLightboxLabel(pos); }}
               >
                 <Image source={{ uri: photoMap[pos] }} style={styles.photo} resizeMode="cover" />
                 <View style={styles.zoomHint}>
@@ -188,7 +267,6 @@ export default function AdminVisitDetail() {
           </View>
         ))}
 
-        {/* Notes */}
         {visit.notes && (
           <>
             <Text style={[styles.sectionTitle, { marginTop: 24 }]}>შენიშვნა</Text>
@@ -199,12 +277,43 @@ export default function AdminVisitDetail() {
         )}
       </ScrollView>
 
-      {/* Full-screen lightbox */}
+      {/* Reject modal */}
+      <Modal visible={rejectModalVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalSheet}>
+            <Text style={styles.modalTitle}>უარყოფის მიზეზი</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={rejectNoteInput}
+              onChangeText={setRejectNoteInput}
+              placeholder="შეიყვანეთ შენიშვნა ჩეკერისთვის..."
+              placeholderTextColor="#aaa"
+              multiline
+              numberOfLines={3}
+              textAlignVertical="top"
+              autoFocus
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => { setRejectModalVisible(false); setRejectNoteInput(''); }}
+              >
+                <Text style={styles.modalCancelText}>გაუქმება</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalRejectBtn} onPress={handleReject}>
+                <Text style={styles.modalRejectText}>უარყოფა</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Lightbox */}
       <Modal
         visible={lightboxUri !== null}
         transparent
         animationType="fade"
-        onRequestClose={closeLightbox}
+        onRequestClose={() => setLightboxUri(null)}
         statusBarTranslucent
       >
         <StatusBar backgroundColor="#000" barStyle="light-content" />
@@ -212,23 +321,14 @@ export default function AdminVisitDetail() {
           <SafeAreaView style={styles.lightboxSafe}>
             <View style={styles.lightboxHeader}>
               <Text style={styles.lightboxLabel}>{lightboxLabel}</Text>
-              <TouchableOpacity onPress={closeLightbox} style={styles.lightboxClose}>
+              <TouchableOpacity onPress={() => setLightboxUri(null)} style={styles.lightboxClose}>
                 <Ionicons name="close" size={28} color="#fff" />
               </TouchableOpacity>
             </View>
           </SafeAreaView>
-
-          <TouchableOpacity
-            style={styles.lightboxImageArea}
-            activeOpacity={1}
-            onPress={closeLightbox}
-          >
+          <TouchableOpacity style={styles.lightboxImageArea} activeOpacity={1} onPress={() => setLightboxUri(null)}>
             {lightboxUri && (
-              <Image
-                source={{ uri: lightboxUri }}
-                style={styles.lightboxImage}
-                resizeMode="contain"
-              />
+              <Image source={{ uri: lightboxUri }} style={styles.lightboxImage} resizeMode="contain" />
             )}
           </TouchableOpacity>
         </View>
@@ -242,7 +342,16 @@ const styles = StyleSheet.create({
   content: { padding: 16, paddingBottom: 48 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
-  infoCard: { backgroundColor: '#fff', borderRadius: 14, padding: 16, marginBottom: 20 },
+  statusBanner: {
+    flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap',
+    borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10,
+    borderWidth: 1, marginBottom: 12, gap: 6,
+  },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  statusText: { fontSize: 13, fontWeight: '700' },
+  statusNote: { fontSize: 13, color: '#555', flex: 1 },
+
+  infoCard: { backgroundColor: '#fff', borderRadius: 14, padding: 16, marginBottom: 12 },
   shopName: { fontSize: 17, fontWeight: '800', color: '#1a1a2e', marginBottom: 2 },
   shopLocation: { fontSize: 13, color: '#888', marginBottom: 14 },
   metaRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
@@ -252,9 +361,18 @@ const styles = StyleSheet.create({
   scoreBadgeText: { fontSize: 20, fontWeight: '800' },
   scorePct: { fontSize: 13, fontWeight: '600' },
 
+  actionBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 8, borderRadius: 12, paddingVertical: 14, marginBottom: 8,
+  },
+  actionBtnDisabled: { opacity: 0.6 },
+  approveBtn: { backgroundColor: '#16a34a' },
+  rejectBtn: { backgroundColor: '#dc2626' },
+  actionBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+
   sectionTitle: {
     fontSize: 11, fontWeight: '700', color: '#888',
-    textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8,
+    textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8, marginTop: 8,
   },
 
   positionCard: { backgroundColor: '#fff', borderRadius: 12, padding: 14, marginBottom: 10 },
@@ -274,7 +392,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8, paddingVertical: 4,
   },
   zoomHintText: { color: '#fff', fontSize: 11 },
-
   noPhoto: {
     height: 80, backgroundColor: '#f5f5f5', borderRadius: 8,
     justifyContent: 'center', alignItems: 'center',
@@ -284,7 +401,32 @@ const styles = StyleSheet.create({
   notesCard: { backgroundColor: '#fff', borderRadius: 12, padding: 16 },
   notesText: { fontSize: 14, color: '#444', lineHeight: 22 },
 
-  // Lightbox
+  modalOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center', alignItems: 'center', padding: 24,
+  },
+  modalSheet: {
+    backgroundColor: '#fff', borderRadius: 16,
+    padding: 20, width: '100%', maxWidth: 400,
+  },
+  modalTitle: { fontSize: 16, fontWeight: '700', color: '#1a1a2e', marginBottom: 12 },
+  modalInput: {
+    backgroundColor: '#f5f5f5', borderRadius: 10, borderWidth: 1, borderColor: '#e0e0e0',
+    paddingHorizontal: 14, paddingVertical: 10, fontSize: 14, color: '#1a1a2e',
+    minHeight: 80, marginBottom: 16,
+  },
+  modalActions: { flexDirection: 'row', gap: 10 },
+  modalCancelBtn: {
+    flex: 1, paddingVertical: 12, borderRadius: 10,
+    borderWidth: 1, borderColor: '#e0e0e0', alignItems: 'center',
+  },
+  modalCancelText: { fontSize: 14, fontWeight: '600', color: '#666' },
+  modalRejectBtn: {
+    flex: 1, paddingVertical: 12, borderRadius: 10,
+    backgroundColor: '#dc2626', alignItems: 'center',
+  },
+  modalRejectText: { fontSize: 14, fontWeight: '700', color: '#fff' },
+
   lightboxBg: { flex: 1, backgroundColor: '#000' },
   lightboxSafe: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 },
   lightboxHeader: {

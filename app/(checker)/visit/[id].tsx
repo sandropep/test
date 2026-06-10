@@ -46,8 +46,7 @@ interface PhotoState {
 }
 
 export default function VisitDetail() {
-  const { id, mode } = useLocalSearchParams<{ id: string; mode?: string }>();
-  const readOnly = mode === 'view';
+  const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
 
   const [selectedShop, setSelectedShop] = useState<Shop | null>(null);
@@ -58,8 +57,12 @@ export default function VisitDetail() {
   const [photos, setPhotos] = useState<Partial<Record<Position, PhotoState>>>({});
   const [notes, setNotes] = useState('');
   const [checkerName, setCheckerName] = useState('');
+  const [status, setStatus] = useState('pending');
+  const [rejectionNote, setRejectionNote] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  const readOnly = status === 'approved';
 
   // Debounced shop search
   useEffect(() => {
@@ -99,6 +102,8 @@ export default function VisitDetail() {
     setSelectedShop(shop ?? null);
     setDate(visit.date);
     setNotes(visit.notes ?? '');
+    setStatus(visit.status ?? 'pending');
+    setRejectionNote(visit.rejection_note ?? null);
     setRatings({
       'საწყობი': visit.warehouse_rating,
       'მაცივარი': visit.fridge_rating,
@@ -182,15 +187,21 @@ export default function VisitDetail() {
 
     setSaving(true);
     try {
+      const updatePayload: Record<string, any> = {
+        shop_id: selectedShop.id,
+        warehouse_rating: ratings['საწყობი'],
+        fridge_rating: ratings['მაცივარი'],
+        shelf_rating: ratings['თარო'],
+        notes: notes.trim() || null,
+      };
+      if (status === 'rejected') {
+        updatePayload.status = 'pending';
+        updatePayload.rejection_note = null;
+      }
+
       const { error: visitError } = await supabase
         .from('visits')
-        .update({
-          shop_id: selectedShop.id,
-          warehouse_rating: ratings['საწყობი'],
-          fridge_rating: ratings['მაცივარი'],
-          shelf_rating: ratings['თარო'],
-          notes: notes.trim() || null,
-        })
+        .update(updatePayload)
         .eq('id', id);
 
       if (visitError) throw visitError;
@@ -242,6 +253,23 @@ export default function VisitDetail() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      {/* Rejection banner */}
+      {status === 'rejected' && (
+        <View style={styles.rejectionBanner}>
+          <Ionicons name="alert-circle" size={18} color="#dc2626" />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.rejectionTitle}>ვიზიტი უარყოფილია</Text>
+            {rejectionNote && <Text style={styles.rejectionNote}>{rejectionNote}</Text>}
+          </View>
+        </View>
+      )}
+      {status === 'approved' && (
+        <View style={styles.approvedBanner}>
+          <Ionicons name="checkmark-circle" size={18} color="#16a34a" />
+          <Text style={styles.approvedTitle}>ვიზიტი დადასტურებულია</Text>
+        </View>
+      )}
+
       {/* Shop selector */}
       <Text style={styles.sectionTitle}>მაღაზია</Text>
       {selectedShop ? (
@@ -372,6 +400,20 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f0f2f5' },
   content: { padding: 16, paddingBottom: 48 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+
+  rejectionBanner: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 10,
+    backgroundColor: '#fff5f5', borderRadius: 10, padding: 14,
+    borderWidth: 1, borderColor: '#dc262640', marginBottom: 16,
+  },
+  rejectionTitle: { fontSize: 13, fontWeight: '700', color: '#dc2626', marginBottom: 2 },
+  rejectionNote: { fontSize: 13, color: '#555', lineHeight: 18 },
+  approvedBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: '#f0fdf4', borderRadius: 10, padding: 14,
+    borderWidth: 1, borderColor: '#16a34a40', marginBottom: 16,
+  },
+  approvedTitle: { fontSize: 13, fontWeight: '700', color: '#16a34a' },
 
   badge: { borderRadius: 6, paddingHorizontal: 10, paddingVertical: 3 },
   badgeText: { fontSize: 13, fontWeight: '700' },

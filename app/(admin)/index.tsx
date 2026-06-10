@@ -165,6 +165,7 @@ const [totalShops, setTotalShops] = useState(0);
       .select('id, date, shop_id, checker_id, score_percent, category, shops(shop_number, name)')
       .order('date', { ascending: false })
       .limit(100);
+    q = q.eq('status', 'approved');
     q = q.gte('date', fmt(fromDate));
     q = q.lte('date', fmt(toDate));
     if (selectedChecker) q = q.eq('checker_id', selectedChecker);
@@ -213,21 +214,18 @@ const shopsVisited = new Set(currentVisits.map(v => v.shop_id)).size;
           <View style={styles.dateRangeRow}>
             {Platform.OS === 'web' ? (
               <>
-                <DateTimePicker
-                  value={fromDate}
-                  mode="date"
-                  display="default"
-                  maximumDate={toDate}
-                  onChange={(_, d) => d && setFromDate(d)}
+                <TextInput
+                  style={styles.dateInput}
+                  value={fmt(fromDate)}
+                  onChangeText={v => { if (v) setFromDate(new Date(v + 'T00:00:00')); }}
+                  {...{ type: 'date' } as any}
                 />
                 <Text style={styles.dateSep}>—</Text>
-                <DateTimePicker
-                  value={toDate}
-                  mode="date"
-                  display="default"
-                  minimumDate={fromDate}
-                  maximumDate={today()}
-                  onChange={(_, d) => d && setToDate(d)}
+                <TextInput
+                  style={styles.dateInput}
+                  value={fmt(toDate)}
+                  onChangeText={v => { if (v) setToDate(new Date(v + 'T00:00:00')); }}
+                  {...{ type: 'date' } as any}
                 />
               </>
             ) : (
@@ -476,6 +474,11 @@ const styles = StyleSheet.create({
 
   dateRangeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 12 },
   dateSep: { fontSize: 14, color: '#aaa', fontWeight: '600' },
+  dateInput: {
+    backgroundColor: '#f0f2f5', borderRadius: 8, paddingHorizontal: 10,
+    paddingVertical: 6, fontSize: 13, color: '#1a1a2e',
+    borderWidth: 1, borderColor: '#e0e0e0',
+  },
   datePillBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: '#eff6ff', borderRadius: 20,

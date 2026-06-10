@@ -14,6 +14,13 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 interface Shop { id: string; shop_number: string; name: string }
 interface Checker { id: string; full_name: string }
+const STATUS_COLORS: Record<string, string> = {
+  pending: '#d97706', approved: '#16a34a', rejected: '#dc2626',
+};
+const STATUS_LABELS: Record<string, string> = {
+  pending: 'მოლოდინში', approved: 'დადასტურებული', rejected: 'უარყოფილი',
+};
+
 interface Visit {
   id: string;
   date: string;
@@ -21,6 +28,7 @@ interface Visit {
   score_percent: number;
   category: string;
   checker_id: string;
+  status: string;
   shops: { shop_number: string; name: string } | null;
 }
 
@@ -45,6 +53,7 @@ export default function VisitsList() {
   const [showFromPicker, setShowFromPicker] = useState(false);
   const [showToPicker, setShowToPicker] = useState(false);
 
+  const [statusFilter, setStatusFilter] = useState<string>('pending');
   const [selectedChecker, setSelectedChecker] = useState<string | null>(null);
   const [checkerModalVisible, setCheckerModalVisible] = useState(false);
   const [selectedShop, setSelectedShop] = useState<Shop | null>(null);
@@ -73,16 +82,17 @@ export default function VisitsList() {
   const load = useCallback(async () => {
     let q = supabase
       .from('visits')
-      .select('id, date, created_at, score_percent, category, checker_id, shops(shop_number, name)')
+      .select('id, date, created_at, score_percent, category, checker_id, status, shops(shop_number, name)')
       .order('created_at', { ascending: false })
       .limit(150);
     q = q.gte('date', fmt(fromDate));
     q = q.lte('date', fmt(toDate));
+    if (statusFilter !== 'all') q = q.eq('status', statusFilter);
     if (selectedChecker) q = q.eq('checker_id', selectedChecker);
     if (selectedShop) q = q.eq('shop_id', selectedShop.id);
     const { data } = await q;
     setVisits((data as unknown as Visit[]) ?? []);
-  }, [fromDate, toDate, selectedChecker, selectedShop]);
+  }, [fromDate, toDate, statusFilter, selectedChecker, selectedShop]);
 
   useEffect(() => {
     load().finally(() => setLoading(false));
@@ -179,6 +189,21 @@ export default function VisitsList() {
               </>
             )}
           </View>
+        </View>
+
+        {/* Status tabs */}
+        <View style={styles.statusTabs}>
+          {(['pending', 'approved', 'rejected', 'all'] as const).map(s => (
+            <TouchableOpacity
+              key={s}
+              style={[styles.statusTab, statusFilter === s && { borderBottomColor: STATUS_COLORS[s] ?? '#2563eb', borderBottomWidth: 2 }]}
+              onPress={() => setStatusFilter(s)}
+            >
+              <Text style={[styles.statusTabText, statusFilter === s && { color: STATUS_COLORS[s] ?? '#2563eb', fontWeight: '700' }]}>
+                {s === 'all' ? 'ყველა' : STATUS_LABELS[s]}
+              </Text>
+            </TouchableOpacity>
+          ))}
         </View>
 
         {/* Checker row */}
@@ -329,6 +354,11 @@ export default function VisitsList() {
                     {visit.category}
                   </Text>
                 </View>
+                <View style={[styles.badge, { backgroundColor: (STATUS_COLORS[visit.status] ?? '#888') + '20' }]}>
+                  <Text style={[styles.badgeText, { color: STATUS_COLORS[visit.status] ?? '#888' }]}>
+                    {STATUS_LABELS[visit.status] ?? visit.status}
+                  </Text>
+                </View>
               </View>
               <TouchableOpacity
                 style={styles.deleteBtn}
@@ -361,6 +391,14 @@ const styles = StyleSheet.create({
     fontSize: 12, fontWeight: '700', color: '#888',
     width: 72, paddingLeft: 12, flexShrink: 0,
   },
+
+  statusTabs: {
+    flexDirection: 'row', borderBottomWidth: 1, borderColor: '#f0f0f0', marginBottom: 6,
+  },
+  statusTab: {
+    flex: 1, paddingVertical: 8, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent',
+  },
+  statusTabText: { fontSize: 12, color: '#aaa', fontWeight: '500' },
 
   dateRangeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 12 },
   dateSep: { fontSize: 14, color: '#aaa', fontWeight: '600' },

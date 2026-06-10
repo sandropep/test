@@ -52,7 +52,8 @@ export default function MyStats() {
     const { data } = await supabase
       .from('visits')
       .select('date, score_percent, category')
-      .eq('checker_id', user.id);
+      .eq('checker_id', user.id)
+      .eq('status', 'approved');
 
     if (!data) return;
 

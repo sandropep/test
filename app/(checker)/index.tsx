@@ -13,10 +13,13 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 
 const CATEGORY_COLORS: Record<string, string> = {
-  A: '#16a34a',
-  B: '#2563eb',
-  C: '#d97706',
-  D: '#dc2626',
+  A: '#16a34a', B: '#2563eb', C: '#d97706', D: '#dc2626',
+};
+const STATUS_COLORS: Record<string, string> = {
+  pending: '#d97706', approved: '#16a34a', rejected: '#dc2626',
+};
+const STATUS_LABELS: Record<string, string> = {
+  pending: 'მოლოდინში', approved: 'დადასტურებული', rejected: 'უარყოფილი',
 };
 
 interface Visit {
@@ -25,6 +28,8 @@ interface Visit {
   created_at: string;
   score_percent: number;
   category: string;
+  status: string;
+  rejection_note: string | null;
   notes: string | null;
   shops: { shop_number: string; name: string } | null;
 }
@@ -55,10 +60,10 @@ export default function CheckerHome() {
       supabase.from('users').select('full_name').eq('id', user.id).single(),
       supabase
         .from('visits')
-        .select('id, date, created_at, score_percent, category, notes, shops(shop_number, name)')
+        .select('id, date, created_at, score_percent, category, status, rejection_note, notes, shops(shop_number, name)')
         .eq('checker_id', user.id)
-        .order('date', { ascending: false })
-        .limit(20),
+        .order('created_at', { ascending: false })
+        .limit(30),
     ]);
 
     if (profileRes.data) setFullName(profileRes.data.full_name);
@@ -134,44 +139,41 @@ export default function CheckerHome() {
           <Text style={styles.emptyText}>ჯერ ვიზიტი არ არის</Text>
         </View>
       ) : (
-        visits.map(visit => (
-          <TouchableOpacity
-            key={visit.id}
-            style={styles.visitRow}
-            onPress={() => {
-              Alert.alert(
-                `#${visit.shops?.shop_number} — ${visit.shops?.name}`,
-                undefined,
-                [
-                  {
-                    text: 'ნახვა',
-                    onPress: () => router.push(`/(checker)/visit/${visit.id}?mode=view`),
-                  },
-                  {
-                    text: 'რედაქტირება',
-                    onPress: () => router.push(`/(checker)/visit/${visit.id}?mode=edit`),
-                  },
-                  { text: 'გაუქმება', style: 'cancel' },
-                ]
-              );
-            }}
-            activeOpacity={0.7}
-          >
-            <View style={styles.visitLeft}>
-              <Text style={styles.visitShop}>
-                #{visit.shops?.shop_number} — {visit.shops?.name}
-              </Text>
-              <Text style={styles.visitDate}>{formatDate(visit.created_at)}</Text>
-              {visit.notes ? (
-                <Text style={styles.visitNotes} numberOfLines={1}>{visit.notes}</Text>
-              ) : null}
-            </View>
-            <View style={styles.visitRight}>
-              <Text style={styles.visitScore}>{visit.score_percent}%</Text>
-              <CategoryBadge category={visit.category} />
-            </View>
-          </TouchableOpacity>
-        ))
+        visits.map(visit => {
+          const statusColor = STATUS_COLORS[visit.status] ?? '#888';
+          const isRejected = visit.status === 'rejected';
+          return (
+            <TouchableOpacity
+              key={visit.id}
+              style={[styles.visitRow, isRejected && styles.visitRowRejected]}
+              onPress={() => router.push(`/(checker)/visit/${visit.id}`)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.visitLeft}>
+                <Text style={styles.visitShop}>
+                  #{visit.shops?.shop_number} — {visit.shops?.name}
+                </Text>
+                <Text style={styles.visitDate}>{formatDate(visit.created_at)}</Text>
+                {isRejected && visit.rejection_note ? (
+                  <Text style={styles.rejectionNote} numberOfLines={2}>
+                    ⚠ {visit.rejection_note}
+                  </Text>
+                ) : visit.notes ? (
+                  <Text style={styles.visitNotes} numberOfLines={1}>{visit.notes}</Text>
+                ) : null}
+              </View>
+              <View style={styles.visitRight}>
+                <Text style={styles.visitScore}>{visit.score_percent}%</Text>
+                <CategoryBadge category={visit.category} />
+                <View style={[styles.badge, { backgroundColor: statusColor + '20' }]}>
+                  <Text style={[styles.badgeText, { color: statusColor, fontSize: 10 }]}>
+                    {STATUS_LABELS[visit.status] ?? visit.status}
+                  </Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+          );
+        })
       )}
     </ScrollView>
   );
@@ -229,10 +231,16 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  visitRowRejected: {
+    borderWidth: 1.5,
+    borderColor: '#dc262640',
+    backgroundColor: '#fff5f5',
+  },
   visitLeft: { flex: 1, marginRight: 12 },
   visitShop: { fontSize: 14, fontWeight: '600', color: '#1a1a2e', marginBottom: 2 },
   visitDate: { fontSize: 12, color: '#888' },
   visitNotes: { fontSize: 12, color: '#aaa', marginTop: 2, fontStyle: 'italic' },
+  rejectionNote: { fontSize: 12, color: '#dc2626', marginTop: 4, fontWeight: '500' },
   visitRight: { alignItems: 'flex-end', gap: 4 },
   visitScore: { fontSize: 15, fontWeight: '700', color: '#1a1a2e' },
 
