@@ -193,15 +193,13 @@ export default function VisitDetail() {
   }
 
   async function handleSave() {
-    if (!selectedShop) {
-      Alert.alert('შეცდომა', 'აირჩიეთ მაღაზია');
-      return;
-    }
+    const err = (msg: string) => {
+      if (Platform.OS === 'web') window.alert(msg);
+      else Alert.alert('შეცდომა', msg);
+    };
+    if (!selectedShop) { err('აირჩიეთ მაღაზია'); return; }
     for (const pos of POSITIONS) {
-      if (!ratings[pos]) {
-        Alert.alert('შეცდომა', `მონიშნეთ რეიტინგი: ${pos}`);
-        return;
-      }
+      if (!ratings[pos]) { err(`მონიშნეთ რეიტინგი: ${pos}`); return; }
     }
 
     setSaving(true);

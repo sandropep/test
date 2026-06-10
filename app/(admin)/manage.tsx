@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, ActivityIndicator, Alert, RefreshControl,
+  TextInput, ActivityIndicator, Alert, RefreshControl, Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
@@ -49,7 +49,8 @@ export default function ManagePage() {
 
   async function handleAddShop() {
     if (!shopNumber.trim() || !shopName.trim()) {
-      Alert.alert('შეცდომა', 'ნომერი და სახელი სავალდებულოა');
+      if (Platform.OS === 'web') window.alert('ნომერი და სახელი სავალდებულოა');
+      else Alert.alert('შეცდომა', 'ნომერი და სახელი სავალდებულოა');
       return;
     }
     setShopSaving(true);
@@ -59,7 +60,8 @@ export default function ManagePage() {
       location: shopLocation.trim() || null,
     });
     if (error) {
-      Alert.alert('შეცდომა', error.message);
+      if (Platform.OS === 'web') window.alert(error.message);
+      else Alert.alert('შეცდომა', error.message);
     } else {
       setShopNumber(''); setShopName(''); setShopLocation('');
       await loadShops();
@@ -68,32 +70,36 @@ export default function ManagePage() {
   }
 
   async function handleDeleteShop(shop: Shop) {
-    Alert.alert(
-      'მაღაზიის წაშლა',
-      `#${shop.shop_number} — ${shop.name}`,
-      [
+    const doDelete = async () => {
+      setDeletingShop(shop.id);
+      const { error } = await supabase.from('shops').delete().eq('id', shop.id);
+      if (error) {
+        if (Platform.OS === 'web') window.alert(error.message);
+        else Alert.alert('შეცდომა', error.message);
+      } else {
+        setShops(prev => prev.filter(s => s.id !== shop.id));
+      }
+      setDeletingShop(null);
+    };
+    if (Platform.OS === 'web') {
+      if (window.confirm(`წაიშალოს #${shop.shop_number} — ${shop.name}?`)) doDelete();
+    } else {
+      Alert.alert('მაღაზიის წაშლა', `#${shop.shop_number} — ${shop.name}`, [
         { text: 'გაუქმება', style: 'cancel' },
-        {
-          text: 'წაშლა', style: 'destructive',
-          onPress: async () => {
-            setDeletingShop(shop.id);
-            const { error } = await supabase.from('shops').delete().eq('id', shop.id);
-            if (error) Alert.alert('შეცდომა', error.message);
-            else setShops(prev => prev.filter(s => s.id !== shop.id));
-            setDeletingShop(null);
-          },
-        },
-      ]
-    );
+        { text: 'წაშლა', style: 'destructive', onPress: doDelete },
+      ]);
+    }
   }
 
   async function handleAddChecker() {
     if (!checkerName.trim() || !checkerEmail.trim() || !checkerPassword.trim()) {
-      Alert.alert('შეცდომა', 'ყველა ველი სავალდებულოა');
+      if (Platform.OS === 'web') window.alert('ყველა ველი სავალდებულოა');
+      else Alert.alert('შეცდომა', 'ყველა ველი სავალდებულოა');
       return;
     }
     if (checkerPassword.length < 6) {
-      Alert.alert('შეცდომა', 'პაროლი მინიმუმ 6 სიმბოლო');
+      if (Platform.OS === 'web') window.alert('პაროლი მინიმუმ 6 სიმბოლო');
+      else Alert.alert('შეცდომა', 'პაროლი მინიმუმ 6 სიმბოლო');
       return;
     }
     setCheckerSaving(true);
@@ -115,7 +121,8 @@ export default function ManagePage() {
     }
 
     if (authError) {
-      Alert.alert('შეცდომა', authError.message);
+      if (Platform.OS === 'web') window.alert(authError.message);
+      else Alert.alert('შეცდომა', authError.message);
       setCheckerSaving(false);
       return;
     }
@@ -139,7 +146,8 @@ export default function ManagePage() {
     }
     setCheckerName(''); setCheckerEmail(''); setCheckerPassword('');
     await loadCheckers();
-    Alert.alert('წარმატება', 'ჩეკერი დამატებულია');
+    if (Platform.OS === 'web') window.alert('ჩეკერი დამატებულია');
+    else Alert.alert('წარმატება', 'ჩეკერი დამატებულია');
     setCheckerSaving(false);
   }
 

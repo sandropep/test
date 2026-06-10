@@ -110,7 +110,8 @@ export default function AdminVisitDetail() {
       if (error) throw error;
       setVisit(prev => prev ? { ...prev, status: 'approved', rejection_note: null } : prev);
     } catch (err: any) {
-      Alert.alert('შეცდომა', err.message);
+      if (Platform.OS === 'web') window.alert(err.message);
+      else Alert.alert('შეცდომა', err.message);
     } finally {
       setActionLoading(false);
     }
@@ -118,7 +119,8 @@ export default function AdminVisitDetail() {
 
   async function handleReject() {
     if (!rejectNoteInput.trim()) {
-      Alert.alert('შეცდომა', 'შეიყვანეთ უარყოფის მიზეზი');
+      if (Platform.OS === 'web') window.alert('შეიყვანეთ უარყოფის მიზეზი');
+      else Alert.alert('შეცდომა', 'შეიყვანეთ უარყოფის მიზეზი');
       return;
     }
     setActionLoading(true);
@@ -132,7 +134,8 @@ export default function AdminVisitDetail() {
       setVisit(prev => prev ? { ...prev, status: 'rejected', rejection_note: rejectNoteInput.trim() } : prev);
       setRejectNoteInput('');
     } catch (err: any) {
-      Alert.alert('შეცდომა', err.message);
+      if (Platform.OS === 'web') window.alert(err.message);
+      else Alert.alert('შეცდომა', err.message);
     } finally {
       setActionLoading(false);
     }

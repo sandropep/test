@@ -105,33 +105,33 @@ export default function VisitsList() {
   }, [load]);
 
   async function handleDelete(visit: Visit) {
-    Alert.alert(
-      'ვიზიტის წაშლა',
-      `#${visit.shops?.shop_number} — ${visit.shops?.name}\n${visit.date}`,
-      [
+    const doDelete = async () => {
+      setDeleting(visit.id);
+      try {
+        const { data: photos } = await supabase
+          .from('photos').select('storage_path').eq('visit_id', visit.id);
+        if (photos?.length) {
+          await supabase.storage.from('photos').remove(photos.map(p => p.storage_path));
+        }
+        const { error } = await supabase.from('visits').delete().eq('id', visit.id);
+        if (error) throw error;
+        setVisits(prev => prev.filter(v => v.id !== visit.id));
+      } catch (err: any) {
+        if (Platform.OS === 'web') window.alert(err.message ?? 'სცადეთ თავიდან');
+        else Alert.alert('შეცდომა', err.message ?? 'სცადეთ თავიდან');
+      } finally {
+        setDeleting(null);
+      }
+    };
+    const msg = `#${visit.shops?.shop_number} — ${visit.shops?.name}\n${visit.date}`;
+    if (Platform.OS === 'web') {
+      if (window.confirm(msg)) doDelete();
+    } else {
+      Alert.alert('ვიზიტის წაშლა', msg, [
         { text: 'გაუქმება', style: 'cancel' },
-        {
-          text: 'წაშლა', style: 'destructive',
-          onPress: async () => {
-            setDeleting(visit.id);
-            try {
-              const { data: photos } = await supabase
-                .from('photos').select('storage_path').eq('visit_id', visit.id);
-              if (photos?.length) {
-                await supabase.storage.from('photos').remove(photos.map(p => p.storage_path));
-              }
-              const { error } = await supabase.from('visits').delete().eq('id', visit.id);
-              if (error) throw error;
-              setVisits(prev => prev.filter(v => v.id !== visit.id));
-            } catch (err: any) {
-              Alert.alert('შეცდომა', err.message ?? 'სცადეთ თავიდან');
-            } finally {
-              setDeleting(null);
-            }
-          },
-        },
-      ]
-    );
+        { text: 'წაშლა', style: 'destructive', onPress: doDelete },
+      ]);
+    }
   }
 
   function formatDate(createdAt: string) {

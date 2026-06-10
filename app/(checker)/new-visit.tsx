@@ -52,22 +52,24 @@ export default function NewVisit() {
   const [checkerName, setCheckerName] = useState('');
   const [userId, setUserId] = useState<string | null>(null);
 
+  const clearForm = useCallback(() => {
+    setSelectedShop(null);
+    setShopQuery('');
+    setRatings({});
+    setPhotos({});
+    setNotes('');
+  }, []);
+
   const handleReset = useCallback(() => {
+    if (Platform.OS === 'web') {
+      if (window.confirm('ყველა მონაცემი წაიშლება. დარწმუნებული ხართ?')) clearForm();
+      return;
+    }
     Alert.alert('გასუფთავება', 'ყველა მონაცემი წაიშლება. დარწმუნებული ხართ?', [
       { text: 'გაუქმება', style: 'cancel' },
-      {
-        text: 'გასუფთავება',
-        style: 'destructive',
-        onPress: () => {
-          setSelectedShop(null);
-          setShopQuery('');
-          setRatings({});
-          setPhotos({});
-          setNotes('');
-        },
-      },
+      { text: 'გასუფთავება', style: 'destructive', onPress: clearForm },
     ]);
-  }, []);
+  }, [clearForm]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -128,19 +130,14 @@ export default function NewVisit() {
   }
 
   async function handleSubmit() {
-    if (!selectedShop) {
-      Alert.alert('შეცდომა', 'აირჩიეთ მაღაზია');
-      return;
-    }
+    const err = (msg: string) => {
+      if (Platform.OS === 'web') window.alert(msg);
+      else Alert.alert('შეცდომა', msg);
+    };
+    if (!selectedShop) { err('აირჩიეთ მაღაზია'); return; }
     for (const pos of POSITIONS) {
-      if (!ratings[pos]) {
-        Alert.alert('შეცდომა', `მონიშნეთ რეიტინგი: ${pos}`);
-        return;
-      }
-      if (!photos[pos]) {
-        Alert.alert('შეცდომა', `გადაიღეთ ფოტო: ${pos}`);
-        return;
-      }
+      if (!ratings[pos]) { err(`მონიშნეთ რეიტინგი: ${pos}`); return; }
+      if (!photos[pos]) { err(`გადაიღეთ ფოტო: ${pos}`); return; }
     }
 
     setSubmitting(true);
@@ -185,20 +182,12 @@ export default function NewVisit() {
         if (photoError) throw photoError;
       }
 
-      Alert.alert('წარმატება', 'ვიზიტი შენახულია!', [
-        {
-          text: 'OK',
-          onPress: () => {
-            setSelectedShop(null);
-            setShopQuery('');
-            setRatings({});
-            setPhotos({});
-            setNotes('');
-          },
-        },
-      ]);
+      clearForm();
+      if (Platform.OS === 'web') window.alert('ვიზიტი შენახულია!');
+      else Alert.alert('წარმატება', 'ვიზიტი შენახულია!');
     } catch (err: any) {
-      Alert.alert('შეცდომა', err.message ?? 'სცადეთ თავიდან');
+      if (Platform.OS === 'web') window.alert(err.message ?? 'სცადეთ თავიდან');
+      else Alert.alert('შეცდომა', err.message ?? 'სცადეთ თავიდან');
     } finally {
       setSubmitting(false);
     }

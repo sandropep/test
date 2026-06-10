@@ -19,7 +19,8 @@ export default function LoginScreen() {
 
   async function handleLogin() {
     if (!email.trim() || !password) {
-      Alert.alert('შეცდომა', 'შეავსეთ ყველა ველი');
+      if (Platform.OS === 'web') window.alert('შეავსეთ ყველა ველი');
+      else Alert.alert('შეცდომა', 'შეავსეთ ყველა ველი');
       return;
     }
 
@@ -35,7 +36,8 @@ export default function LoginScreen() {
         error.message === 'Invalid login credentials'
           ? 'არასწორი ელ. ფოსტა ან პაროლი'
           : 'შეცდომა შესვლისას. სცადეთ თავიდან.';
-      Alert.alert('შეცდომა', message);
+      if (Platform.OS === 'web') window.alert(message);
+      else Alert.alert('შეცდომა', message);
     }
     // On success the root _layout auth listener redirects automatically
   }
