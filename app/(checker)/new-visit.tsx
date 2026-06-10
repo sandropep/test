@@ -50,6 +50,7 @@ export default function NewVisit() {
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [checkerName, setCheckerName] = useState('');
+  const [userId, setUserId] = useState<string | null>(null);
 
   const handleReset = useCallback(() => {
     Alert.alert('გასუფთავება', 'ყველა მონაცემი წაიშლება. დარწმუნებული ხართ?', [
@@ -69,8 +70,10 @@ export default function NewVisit() {
   }, []);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      const user = session?.user;
       if (!user) return;
+      setUserId(user.id);
       supabase
         .from('users')
         .select('full_name')
@@ -142,15 +145,14 @@ export default function NewVisit() {
 
     setSubmitting(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
+      if (!userId) throw new Error('Not authenticated');
 
       // Insert visit — score_percent and category computed by DB trigger
       const { data: visit, error: visitError } = await supabase
         .from('visits')
         .insert({
           shop_id: selectedShop.id,
-          checker_id: user.id,
+          checker_id: userId,
           warehouse_rating: ratings['საწყობი'],
           fridge_rating: ratings['მაცივარი'],
           shelf_rating: ratings['თარო'],

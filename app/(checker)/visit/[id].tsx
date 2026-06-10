@@ -4,6 +4,7 @@ import {
   TextInput, Image, Alert, ActivityIndicator, Platform,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { decode } from 'base64-arraybuffer';
@@ -93,7 +94,8 @@ export default function VisitDetail() {
   }, [shopQuery]);
 
   const load = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
     if (user) {
       const { data: profile } = await supabase
         .from('users').select('full_name').eq('id', user.id).single();
@@ -107,8 +109,9 @@ export default function VisitDetail() {
       .single();
 
     if (error || !visit) {
-      Alert.alert('შეცდომა', 'ვიზიტი ვერ მოიძებნა');
-      router.back();
+      if (Platform.OS === 'web') window.alert('ვიზიტი ვერ მოიძებნა');
+      else Alert.alert('შეცდომა', 'ვიზიტი ვერ მოიძებნა');
+      router.canGoBack() ? router.back() : router.replace('/(checker)');
       return;
     }
 
@@ -245,11 +248,15 @@ export default function VisitDetail() {
         if (photoError) throw photoError;
       }
 
-      Alert.alert('წარმატება', 'ვიზიტი განახლდა', [
-        { text: 'OK', onPress: () => router.back() },
-      ]);
+      if (Platform.OS === 'web') {
+        window.alert('ვიზიტი განახლდა');
+        router.back();
+      } else {
+        Alert.alert('წარმატება', 'ვიზიტი განახლდა', [{ text: 'OK', onPress: () => router.back() }]);
+      }
     } catch (err: any) {
-      Alert.alert('შეცდომა', err.message ?? 'სცადეთ თავიდან');
+      if (Platform.OS === 'web') window.alert(err.message ?? 'სცადეთ თავიდან');
+      else Alert.alert('შეცდომა', err.message ?? 'სცადეთ თავიდან');
     } finally {
       setSaving(false);
     }
