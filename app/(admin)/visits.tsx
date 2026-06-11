@@ -6,6 +6,7 @@ import {
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
+import * as XLSX from 'xlsx';
 import { supabase } from '../../lib/supabase';
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -109,6 +110,44 @@ export default function VisitsList() {
     await load();
     setRefreshing(false);
   }, [load]);
+
+  async function handleExport() {
+    let q = supabase
+      .from('visits')
+      .select('date, score_percent, category, warehouse_rating, fridge_rating, shelf_rating, notes, shops(shop_number, name), checker:checker_id(full_name)')
+      .order('date', { ascending: false });
+    q = q.gte('date', fmt(fromDate));
+    q = q.lte('date', fmt(toDate));
+    if (statusFilter !== 'all') q = q.eq('status', statusFilter);
+    if (selectedChecker) q = q.eq('checker_id', selectedChecker);
+    if (selectedShop) q = q.eq('shop_id', selectedShop.id);
+
+    const { data } = await q;
+    if (!data?.length) {
+      if (Platform.OS === 'web') window.alert('საექსპორტო მონაცემი არ მოიძებნა');
+      else Alert.alert('', 'საექსპორტო მონაცემი არ მოიძებნა');
+      return;
+    }
+
+    const headers = ['თარიღი', 'მაღაზია #', 'მაღაზია სახელი', 'ჩეკერი', 'საერთო ქულა %', 'კატეგორია', 'საწყობის ქულა', 'მაცივრის ქულა', 'თაროს ქულა', 'შენიშვნები'];
+    const rows = (data as any[]).map(v => [
+      v.date,
+      v.shops?.shop_number ?? '',
+      v.shops?.name ?? '',
+      (v.checker as any)?.full_name ?? '',
+      v.score_percent,
+      v.category,
+      v.warehouse_rating,
+      v.fridge_rating,
+      v.shelf_rating,
+      v.notes ?? '',
+    ]);
+
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'ვიზიტები');
+    XLSX.writeFile(wb, `visits_${fmt(fromDate)}_${fmt(toDate)}.xlsx`);
+  }
 
   async function handleDelete(visit: Visit) {
     const doDelete = async () => {
@@ -332,7 +371,13 @@ export default function VisitsList() {
           contentContainerStyle={styles.listContent}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           ListHeaderComponent={
-            <Text style={styles.resultCount}>{visits.length} ვიზიტი</Text>
+            <View style={styles.resultHeader}>
+              <Text style={styles.resultCount}>{visits.length} ვიზიტი</Text>
+              <TouchableOpacity style={styles.exportBtn} onPress={handleExport}>
+                <Ionicons name="download-outline" size={15} color="#16a34a" />
+                <Text style={styles.exportBtnText}>Excel</Text>
+              </TouchableOpacity>
+            </View>
           }
           ListEmptyComponent={
             <View style={styles.emptyBox}>
@@ -496,10 +541,20 @@ const styles = StyleSheet.create({
   avatarText: { fontSize: 13, color: '#fff', fontWeight: '700' },
 
   listContent: { padding: 12, paddingBottom: 40 },
+  resultHeader: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    alignItems: 'center', marginBottom: 8,
+  },
   resultCount: {
     fontSize: 11, fontWeight: '700', color: '#888',
-    textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8,
+    textTransform: 'uppercase', letterSpacing: 0.8,
   },
+  exportBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    borderWidth: 1.5, borderColor: '#16a34a', borderRadius: 16,
+    paddingHorizontal: 12, paddingVertical: 5, backgroundColor: '#f0fdf4',
+  },
+  exportBtnText: { fontSize: 13, fontWeight: '700', color: '#16a34a' },
   emptyBox: { padding: 40, alignItems: 'center' },
   emptyText: { color: '#aaa', fontSize: 15 },
 
