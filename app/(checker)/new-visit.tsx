@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
-  StyleSheet, Alert, Image, ActivityIndicator, Platform,
+  StyleSheet, Alert, Image, ActivityIndicator, Platform, Pressable,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -201,7 +201,7 @@ export default function NewVisit() {
     <ScrollView
       style={styles.container}
       contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled"
+      keyboardShouldPersistTaps="always"
     >
       {/* Title row with reset button */}
       <View style={styles.titleRow}>
@@ -238,7 +238,7 @@ export default function NewVisit() {
             placeholderTextColor="#aaa"
           />
           {shopResults.map(shop => (
-            <TouchableOpacity
+            <Pressable
               key={shop.id}
               style={styles.shopRow}
               onPress={() => {
@@ -249,7 +249,7 @@ export default function NewVisit() {
             >
               <Text style={styles.shopRowNumber}>#{shop.shop_number}</Text>
               <Text style={styles.shopRowName}>{shop.name}</Text>
-            </TouchableOpacity>
+            </Pressable>
           ))}
         </View>
       )}
