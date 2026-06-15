@@ -304,27 +304,49 @@ export default function VisitsList() {
         ) : Platform.OS === 'web' ? (
           <View style={styles.customDateRow}>
             <TouchableOpacity style={styles.datePillBtn} onPress={openFromPicker}>
-              <Ionicons name="calendar-outline" size={14} color="#2563eb" />
-              <Text suppressHydrationWarning style={styles.datePillText}>{formatDisplay(fromDate)}</Text>
-              <Ionicons name="chevron-down-outline" size={13} color="#2563eb" />
+              <View style={styles.datePillIcon}>
+                <Ionicons name="calendar-outline" size={15} color="#2563eb" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.datePillLabel}>დაწყება</Text>
+                <Text suppressHydrationWarning style={styles.datePillText}>{formatDisplay(fromDate)}</Text>
+              </View>
+              <Ionicons name="chevron-down-outline" size={14} color="#93c5fd" />
             </TouchableOpacity>
-            <Text style={styles.dateSep}>—</Text>
+            <Ionicons name="arrow-forward-outline" size={16} color="#cbd5e1" />
             <TouchableOpacity style={styles.datePillBtn} onPress={openToPicker}>
-              <Ionicons name="calendar-outline" size={14} color="#2563eb" />
-              <Text suppressHydrationWarning style={styles.datePillText}>{formatDisplay(toDate)}</Text>
-              <Ionicons name="chevron-down-outline" size={13} color="#2563eb" />
+              <View style={styles.datePillIcon}>
+                <Ionicons name="calendar-outline" size={15} color="#2563eb" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.datePillLabel}>დასრულება</Text>
+                <Text suppressHydrationWarning style={styles.datePillText}>{formatDisplay(toDate)}</Text>
+              </View>
+              <Ionicons name="chevron-down-outline" size={14} color="#93c5fd" />
             </TouchableOpacity>
           </View>
         ) : (
           <View style={styles.customDateRow}>
             <TouchableOpacity style={styles.datePillBtn} onPress={() => setShowFromPicker(true)}>
-              <Ionicons name="calendar-outline" size={14} color="#2563eb" />
-              <Text style={styles.datePillText}>{formatDisplay(fromDate)}</Text>
+              <View style={styles.datePillIcon}>
+                <Ionicons name="calendar-outline" size={15} color="#2563eb" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.datePillLabel}>დაწყება</Text>
+                <Text style={styles.datePillText}>{formatDisplay(fromDate)}</Text>
+              </View>
+              <Ionicons name="chevron-down-outline" size={14} color="#93c5fd" />
             </TouchableOpacity>
-            <Text style={styles.dateSep}>—</Text>
+            <Ionicons name="arrow-forward-outline" size={16} color="#cbd5e1" />
             <TouchableOpacity style={styles.datePillBtn} onPress={() => setShowToPicker(true)}>
-              <Ionicons name="calendar-outline" size={14} color="#2563eb" />
-              <Text style={styles.datePillText}>{formatDisplay(toDate)}</Text>
+              <View style={styles.datePillIcon}>
+                <Ionicons name="calendar-outline" size={15} color="#2563eb" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.datePillLabel}>დასრულება</Text>
+                <Text style={styles.datePillText}>{formatDisplay(toDate)}</Text>
+              </View>
+              <Ionicons name="chevron-down-outline" size={14} color="#93c5fd" />
             </TouchableOpacity>
             {showFromPicker && (
               <DateTimePicker value={fromDate} mode="date" maximumDate={toDate}
@@ -575,7 +597,7 @@ const styles = StyleSheet.create({
   dateRangeDisplayText: { fontSize: 12, color: '#888' },
   customDateRow: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
-    paddingHorizontal: 12, paddingBottom: 8,
+    paddingHorizontal: 12, paddingBottom: 12, paddingTop: 2,
   },
   dateRangeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 12 },
   dateSep: { fontSize: 14, color: '#aaa', fontWeight: '600' },
@@ -585,12 +607,19 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: '#e0e0e0',
   },
   datePillBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: '#eff6ff', borderRadius: 20,
-    paddingHorizontal: 12, paddingVertical: 6,
-    borderWidth: 1, borderColor: '#2563eb',
+    flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: '#fff', borderRadius: 14,
+    paddingHorizontal: 12, paddingVertical: 10,
+    borderWidth: 1.5, borderColor: '#dbeafe',
+    shadowColor: '#2563eb', shadowOpacity: 0.08, shadowRadius: 8, shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
-  datePillText: { fontSize: 13, color: '#2563eb', fontWeight: '600' },
+  datePillIcon: {
+    width: 32, height: 32, borderRadius: 8,
+    backgroundColor: '#eff6ff', alignItems: 'center', justifyContent: 'center',
+  },
+  datePillLabel: { fontSize: 9, color: '#93c5fd', fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.8 },
+  datePillText: { fontSize: 14, color: '#1e40af', fontWeight: '700', marginTop: 1 },
 
   dropdownBtn: {
     flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8,
