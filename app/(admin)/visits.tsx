@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, Platform,
   Alert, ActivityIndicator, RefreshControl, TextInput, Modal, Pressable,
@@ -13,13 +13,6 @@ const CATEGORY_COLORS: Record<string, string> = {
   A: '#16a34a', B: '#2563eb', C: '#d97706', D: '#dc2626',
 };
 
-function openWebPicker(id: string) {
-  try {
-    const el = (document as any).getElementById(id) as HTMLInputElement | null;
-    if (el?.showPicker) el.showPicker();
-    else el?.click();
-  } catch {}
-}
 
 interface Shop { id: string; shop_number: string; name: string; location: string | null }
 interface Checker { id: string; full_name: string }
@@ -86,6 +79,51 @@ export default function VisitsList() {
   const [toDate, setToDate] = useState<Date>(() => datesForPreset('month').to);
   const [showFromPicker, setShowFromPicker] = useState(false);
   const [showToPicker, setShowToPicker] = useState(false);
+
+  // Web-only: real DOM date inputs created imperatively to avoid SSR hydration issues
+  const fromPickerEl = useRef<HTMLInputElement | null>(null);
+  const toPickerEl = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const mkInput = (onChange: (v: string) => void) => {
+      const el = document.createElement('input');
+      el.type = 'date';
+      el.style.cssText = 'position:fixed;left:0;top:0;opacity:0;width:1px;height:1px;pointer-events:none;';
+      el.addEventListener('change', () => { if (el.value) onChange(el.value); });
+      document.body.appendChild(el);
+      return el;
+    };
+    fromPickerEl.current = mkInput(v => setFromDate(new Date(v + 'T00:00:00')));
+    toPickerEl.current = mkInput(v => setToDate(new Date(v + 'T00:00:00')));
+    return () => {
+      fromPickerEl.current?.remove();
+      toPickerEl.current?.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    if (fromPickerEl.current) { fromPickerEl.current.value = fmt(fromDate); fromPickerEl.current.max = fmt(toDate); }
+    if (toPickerEl.current) { toPickerEl.current.value = fmt(toDate); toPickerEl.current.min = fmt(fromDate); toPickerEl.current.max = fmt(todayDate()); }
+  }, [fromDate, toDate]);
+
+  function openFromPicker() {
+    const el = fromPickerEl.current;
+    if (!el) return;
+    el.style.pointerEvents = 'auto';
+    el.focus();
+    try { (el as any).showPicker?.(); } catch { el.click(); }
+    el.style.pointerEvents = 'none';
+  }
+  function openToPicker() {
+    const el = toPickerEl.current;
+    if (!el) return;
+    el.style.pointerEvents = 'auto';
+    el.focus();
+    try { (el as any).showPicker?.(); } catch { el.click(); }
+    el.style.pointerEvents = 'none';
+  }
 
   const [statusFilter, setStatusFilter] = useState<string>('pending');
   const [selectedChecker, setSelectedChecker] = useState<string | null>(null);
@@ -251,37 +289,23 @@ export default function VisitsList() {
         {datePreset !== 'custom' ? (
           <View style={styles.dateRangeDisplay}>
             <Ionicons name="calendar-outline" size={13} color="#888" />
-            <Text style={styles.dateRangeDisplayText}>
+            <Text suppressHydrationWarning style={styles.dateRangeDisplayText}>
               {formatDisplay(fromDate)} — {formatDisplay(toDate)}
             </Text>
           </View>
         ) : Platform.OS === 'web' ? (
           <View style={styles.customDateRow}>
-            <TouchableOpacity style={styles.datePillBtn} onPress={() => openWebPicker('filter-from-date')}>
+            <TouchableOpacity style={styles.datePillBtn} onPress={openFromPicker}>
               <Ionicons name="calendar-outline" size={14} color="#2563eb" />
-              <Text style={styles.datePillText}>{formatDisplay(fromDate)}</Text>
+              <Text suppressHydrationWarning style={styles.datePillText}>{formatDisplay(fromDate)}</Text>
               <Ionicons name="chevron-down-outline" size={13} color="#2563eb" />
             </TouchableOpacity>
-            <TextInput
-              nativeID="filter-from-date"
-              style={{ position: 'absolute', opacity: 0, width: 1, height: 1 } as any}
-              value={fmt(fromDate)}
-              onChangeText={v => { if (v) setFromDate(new Date(v + 'T00:00:00')); }}
-              {...{ type: 'date', max: fmt(toDate) } as any}
-            />
             <Text style={styles.dateSep}>—</Text>
-            <TouchableOpacity style={styles.datePillBtn} onPress={() => openWebPicker('filter-to-date')}>
+            <TouchableOpacity style={styles.datePillBtn} onPress={openToPicker}>
               <Ionicons name="calendar-outline" size={14} color="#2563eb" />
-              <Text style={styles.datePillText}>{formatDisplay(toDate)}</Text>
+              <Text suppressHydrationWarning style={styles.datePillText}>{formatDisplay(toDate)}</Text>
               <Ionicons name="chevron-down-outline" size={13} color="#2563eb" />
             </TouchableOpacity>
-            <TextInput
-              nativeID="filter-to-date"
-              style={{ position: 'absolute', opacity: 0, width: 1, height: 1 } as any}
-              value={fmt(toDate)}
-              onChangeText={v => { if (v) setToDate(new Date(v + 'T00:00:00')); }}
-              {...{ type: 'date', min: fmt(fromDate), max: fmt(todayDate()) } as any}
-            />
           </View>
         ) : (
           <View style={styles.customDateRow}>
