@@ -95,7 +95,7 @@ export default function NewVisit() {
       const { data } = await supabase
         .from('shops')
         .select('id, shop_number, name, location')
-        .or(`shop_number.ilike.%${shopQuery}%,name.ilike.%${shopQuery}%`)
+        .or(`shop_number.ilike.%${shopQuery}%,name.ilike.%${shopQuery}%,location.ilike.%${shopQuery}%`)
         .limit(10);
       setShopResults(data ?? []);
     }, 300);
@@ -234,7 +234,7 @@ export default function NewVisit() {
             style={styles.input}
             value={shopQuery}
             onChangeText={setShopQuery}
-            placeholder="ნომერი ან სახელი..."
+            placeholder="ნომერი, სახელი ან მისამართი..."
             placeholderTextColor="#aaa"
           />
           {shopResults.map(shop => (
@@ -248,7 +248,10 @@ export default function NewVisit() {
               }}
             >
               <Text style={styles.shopRowNumber}>#{shop.shop_number}</Text>
-              <Text style={styles.shopRowName}>{shop.name}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.shopRowName}>{shop.name}</Text>
+                {shop.location ? <Text style={styles.shopRowLocation} numberOfLines={1}>{shop.location}</Text> : null}
+              </View>
             </Pressable>
           ))}
         </View>
@@ -373,7 +376,8 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   shopRowNumber: { fontWeight: '700', color: '#2563eb', fontSize: 13, minWidth: 48 },
-  shopRowName: { color: '#333', fontSize: 14, flex: 1 },
+  shopRowName: { color: '#333', fontSize: 14 },
+  shopRowLocation: { color: '#aaa', fontSize: 11, marginTop: 1 },
 
   selectedShop: {
     backgroundColor: '#fff',

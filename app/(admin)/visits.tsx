@@ -13,7 +13,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   A: '#16a34a', B: '#2563eb', C: '#d97706', D: '#dc2626',
 };
 
-interface Shop { id: string; shop_number: string; name: string }
+interface Shop { id: string; shop_number: string; name: string; location: string | null }
 interface Checker { id: string; full_name: string }
 const STATUS_COLORS: Record<string, string> = {
   pending: '#d97706', approved: '#16a34a', rejected: '#dc2626',
@@ -73,9 +73,9 @@ export default function VisitsList() {
     if (shopQuery.length < 2) { setShopResults([]); return; }
     const t = setTimeout(async () => {
       const { data } = await supabase
-        .from('shops').select('id, shop_number, name')
+        .from('shops').select('id, shop_number, name, location')
         .or(`shop_number.ilike.%${shopQuery}%,name.ilike.%${shopQuery}%`).limit(8);
-      setShopResults(data ?? []);
+      setShopResults((data ?? []) as Shop[]);
     }, 300);
     return () => clearTimeout(t);
   }, [shopQuery]);
@@ -279,9 +279,12 @@ export default function VisitsList() {
           <View style={[styles.shopSearchWrapper, { flex: 1 }]}>
             {selectedShop ? (
               <View style={styles.shopSelected}>
-                <Text style={styles.shopSelectedText} numberOfLines={1}>
-                  #{selectedShop.shop_number} — {selectedShop.name}
-                </Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.shopSelectedText} numberOfLines={1}>
+                    #{selectedShop.shop_number} — {selectedShop.name}
+                  </Text>
+                  {selectedShop.location ? <Text style={styles.shopDropdownLocation} numberOfLines={1}>{selectedShop.location}</Text> : null}
+                </View>
                 <TouchableOpacity onPress={() => { setSelectedShop(null); setShopQuery(''); }}>
                   <Ionicons name="close-circle" size={18} color="#888" />
                 </TouchableOpacity>
@@ -304,7 +307,10 @@ export default function VisitsList() {
                     onPress={() => { setSelectedShop(shop); setShopResults([]); setShopQuery(''); }}
                   >
                     <Text style={styles.shopDropdownNum}>#{shop.shop_number}</Text>
-                    <Text style={styles.shopDropdownName}>{shop.name}</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.shopDropdownName}>{shop.name}</Text>
+                      {shop.location ? <Text style={styles.shopDropdownLocation} numberOfLines={1}>{shop.location}</Text> : null}
+                    </View>
                   </TouchableOpacity>
                 ))}
               </View>
@@ -504,6 +510,7 @@ const styles = StyleSheet.create({
   },
   shopDropdownNum: { fontWeight: '700', color: '#2563eb', fontSize: 13, minWidth: 44 },
   shopDropdownName: { color: '#333', fontSize: 14 },
+  shopDropdownLocation: { color: '#aaa', fontSize: 11, marginTop: 1 },
 
   clearBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
