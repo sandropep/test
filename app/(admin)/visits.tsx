@@ -86,16 +86,20 @@ export default function VisitsList() {
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;
-    const mkInput = (onChange: (v: string) => void) => {
+    const mkInput = (label: string, onChange: (v: string) => void) => {
       const el = document.createElement('input');
       el.type = 'date';
       el.style.cssText = 'position:fixed;left:0;top:0;opacity:0;width:1px;height:1px;pointer-events:none;';
-      el.addEventListener('change', () => { if (el.value) onChange(el.value); });
+      el.addEventListener('change', () => {
+        console.log(`[DatePicker] ${label} changed:`, el.value);
+        if (el.value) onChange(el.value);
+      });
       document.body.appendChild(el);
+      console.log(`[DatePicker] created ${label} input`, el);
       return el;
     };
-    fromPickerEl.current = mkInput(v => setFromDate(new Date(v + 'T00:00:00')));
-    toPickerEl.current = mkInput(v => setToDate(new Date(v + 'T00:00:00')));
+    fromPickerEl.current = mkInput('from', v => setFromDate(new Date(v + 'T00:00:00')));
+    toPickerEl.current = mkInput('to', v => setToDate(new Date(v + 'T00:00:00')));
     return () => {
       fromPickerEl.current?.remove();
       toPickerEl.current?.remove();
@@ -109,19 +113,23 @@ export default function VisitsList() {
   }, [fromDate, toDate]);
 
   function openFromPicker() {
+    console.log('[DatePicker] openFromPicker called, el:', fromPickerEl.current);
     const el = fromPickerEl.current;
-    if (!el) return;
+    if (!el) { console.warn('[DatePicker] from input not mounted'); return; }
     el.style.pointerEvents = 'auto';
     el.focus();
-    try { (el as any).showPicker?.(); } catch { el.click(); }
+    console.log('[DatePicker] focused from, showPicker available:', typeof (el as any).showPicker);
+    try { (el as any).showPicker(); } catch (e) { console.warn('[DatePicker] showPicker failed, falling back to click:', e); el.click(); }
     el.style.pointerEvents = 'none';
   }
   function openToPicker() {
+    console.log('[DatePicker] openToPicker called, el:', toPickerEl.current);
     const el = toPickerEl.current;
-    if (!el) return;
+    if (!el) { console.warn('[DatePicker] to input not mounted'); return; }
     el.style.pointerEvents = 'auto';
     el.focus();
-    try { (el as any).showPicker?.(); } catch { el.click(); }
+    console.log('[DatePicker] focused to, showPicker available:', typeof (el as any).showPicker);
+    try { (el as any).showPicker(); } catch (e) { console.warn('[DatePicker] showPicker failed, falling back to click:', e); el.click(); }
     el.style.pointerEvents = 'none';
   }
 
