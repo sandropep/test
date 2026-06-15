@@ -29,6 +29,7 @@ export default function ManagePage() {
   const [checkerEmail, setCheckerEmail] = useState('');
   const [checkerPassword, setCheckerPassword] = useState('');
   const [checkerSaving, setCheckerSaving] = useState(false);
+  const [deletingChecker, setDeletingChecker] = useState<string | null>(null);
 
   const loadShops = useCallback(async () => {
     const { data } = await supabase
@@ -158,6 +159,29 @@ export default function ManagePage() {
     setCheckerSaving(false);
   }
 
+  async function handleDeleteChecker(checker: Checker) {
+    const doDelete = async () => {
+      setDeletingChecker(checker.id);
+      const { error } = await supabase.from('users').delete().eq('id', checker.id);
+      if (error) {
+        if (Platform.OS === 'web') window.alert(error.message);
+        else Alert.alert('შეცდომა', error.message);
+      } else {
+        setCheckers(prev => prev.filter(c => c.id !== checker.id));
+      }
+      setDeletingChecker(null);
+    };
+    const msg = `${checker.full_name} (${checker.email})`;
+    if (Platform.OS === 'web') {
+      if (window.confirm(`წაიშალოს ჩეკერი?\n${msg}`)) doDelete();
+    } else {
+      Alert.alert('ჩეკერის წაშლა', msg, [
+        { text: 'გაუქმება', style: 'cancel' },
+        { text: 'წაშლა', style: 'destructive', onPress: doDelete },
+      ]);
+    }
+  }
+
   return (
     <View style={styles.container}>
       {/* Tab toggle */}
@@ -285,13 +309,23 @@ export default function ManagePage() {
             ? <ActivityIndicator color="#2563eb" style={{ marginTop: 24 }} />
             : checkers.map(c => (
               <View key={c.id} style={styles.listRow}>
-                <View style={[styles.listAvatar]}>
+                <View style={styles.listAvatar}>
                   <Text style={styles.listAvatarText}>{(c.full_name || '?').slice(0, 2).toUpperCase()}</Text>
                 </View>
                 <View style={styles.listLeft}>
                   <Text style={styles.listPrimary}>{c.full_name || '—'}</Text>
                   <Text style={styles.listSub}>{c.email}</Text>
                 </View>
+                <TouchableOpacity
+                  style={styles.deleteBtn}
+                  onPress={() => handleDeleteChecker(c)}
+                  disabled={deletingChecker === c.id}
+                >
+                  {deletingChecker === c.id
+                    ? <ActivityIndicator size="small" color="#dc2626" />
+                    : <Ionicons name="trash-outline" size={18} color="#dc2626" />
+                  }
+                </TouchableOpacity>
               </View>
             ))
           }
