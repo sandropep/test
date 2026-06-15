@@ -271,26 +271,32 @@ export default function VisitsList() {
       {/* ── Filter bar ── */}
       <View style={styles.filterBar}>
 
-        {/* Date preset chips */}
+        {/* Date preset chips + Excel export */}
         <View style={styles.datePresetsRow}>
-          {DATE_PRESETS.map(p => (
-            <TouchableOpacity
-              key={p.key}
-              style={[styles.dateChip, datePreset === p.key && styles.dateChipActive]}
-              onPress={() => {
-                setDatePreset(p.key);
-                if (p.key !== 'custom') {
-                  const { from, to } = datesForPreset(p.key);
-                  setFromDate(from);
-                  setToDate(to);
-                }
-              }}
-            >
-              <Text style={[styles.dateChipText, datePreset === p.key && styles.dateChipTextActive]}>
-                {p.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
+          <View style={{ flexDirection: 'row', gap: 6, flex: 1, flexWrap: 'wrap' }}>
+            {DATE_PRESETS.map(p => (
+              <TouchableOpacity
+                key={p.key}
+                style={[styles.dateChip, datePreset === p.key && styles.dateChipActive]}
+                onPress={() => {
+                  setDatePreset(p.key);
+                  if (p.key !== 'custom') {
+                    const { from, to } = datesForPreset(p.key);
+                    setFromDate(from);
+                    setToDate(to);
+                  }
+                }}
+              >
+                <Text style={[styles.dateChipText, datePreset === p.key && styles.dateChipTextActive]}>
+                  {p.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <TouchableOpacity style={styles.exportBtn} onPress={handleExport}>
+            <Ionicons name="download-outline" size={16} color="#16a34a" />
+            <Text style={styles.exportBtnText}>Excel Export</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Active range display or custom inputs */}
@@ -500,13 +506,9 @@ export default function VisitsList() {
           contentContainerStyle={styles.listContent}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           ListHeaderComponent={
-            <View style={styles.resultHeader}>
-              <Text style={styles.resultCount}>{visits.length} ვიზიტი</Text>
-              <TouchableOpacity style={styles.exportBtn} onPress={handleExport}>
-                <Ionicons name="download-outline" size={15} color="#16a34a" />
-                <Text style={styles.exportBtnText}>Excel</Text>
-              </TouchableOpacity>
-            </View>
+            <Text style={[styles.resultCount, { paddingHorizontal: 16, paddingTop: 8 }]}>
+              {visits.length} ვიზიტი
+            </Text>
           }
           ListEmptyComponent={
             <View style={styles.emptyBox}>
@@ -581,7 +583,8 @@ const styles = StyleSheet.create({
   statusTabText: { fontSize: 12, color: '#aaa', fontWeight: '500' },
 
   datePresetsRow: {
-    flexDirection: 'row', gap: 6, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 6,
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: 12, paddingTop: 10, paddingBottom: 6,
   },
   dateChip: {
     paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20,
@@ -706,11 +709,11 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase', letterSpacing: 0.8,
   },
   exportBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    borderWidth: 1.5, borderColor: '#16a34a', borderRadius: 16,
-    paddingHorizontal: 12, paddingVertical: 5, backgroundColor: '#f0fdf4',
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    borderWidth: 1.5, borderColor: '#16a34a', borderRadius: 20,
+    paddingHorizontal: 14, paddingVertical: 8, backgroundColor: '#f0fdf4',
   },
-  exportBtnText: { fontSize: 13, fontWeight: '700', color: '#16a34a' },
+  exportBtnText: { fontSize: 14, fontWeight: '700', color: '#16a34a' },
   emptyBox: { padding: 40, alignItems: 'center' },
   emptyText: { color: '#aaa', fontSize: 15 },
 
