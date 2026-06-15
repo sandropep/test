@@ -139,19 +139,16 @@ export default function ManagePage() {
 
     const userId = authData.user?.id;
     if (userId) {
-      const { error: upsertError } = await supabase.from('users').upsert({
-        id: userId,
-        full_name: checkerName.trim(),
-        email: generatedEmail,
-        role: 'checker',
-      }, { onConflict: 'id' });
-
+      const payload = { id: userId, full_name: checkerName.trim(), email: generatedEmail, role: 'checker' };
+      const { error: upsertError } = await supabase.from('users').upsert(payload, { onConflict: 'id' });
       if (upsertError) {
-        await supabase.from('users').update({
-          full_name: checkerName.trim(),
-          email: generatedEmail,
-          role: 'checker',
-        }).eq('id', userId);
+        console.error('[AddChecker] upsert failed, trying update:', upsertError);
+        const { error: updateError } = await supabase.from('users').update(payload).eq('id', userId);
+        if (updateError) {
+          console.error('[AddChecker] update also failed:', updateError);
+          if (Platform.OS === 'web') window.alert(`ჩეკერი შეიქმნა, მაგრამ მონაცემები ვერ შეინახა: ${updateError.message}`);
+          else Alert.alert('გაფრთხილება', `ჩეკერი შეიქმნა, მაგრამ მონაცემები ვერ შეინახა: ${updateError.message}`);
+        }
       }
     }
     setCheckerName(''); setCheckerPassword('');
@@ -166,6 +163,7 @@ export default function ManagePage() {
       setDeletingChecker(checker.id);
       const { error } = await supabase.from('users').delete().eq('id', checker.id);
       if (error) {
+        console.error('[DeleteChecker] error:', error);
         if (Platform.OS === 'web') window.alert(error.message);
         else Alert.alert('შეცდომა', error.message);
       } else {

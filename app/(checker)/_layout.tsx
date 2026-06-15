@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { Platform } from 'react-native';
 import { Tabs, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
@@ -30,6 +31,7 @@ export default function CheckerLayout() {
         headerTintColor: '#1a1a2e',
         headerTitleStyle: { fontWeight: '700', color: '#1a1a2e' },
         headerRight: () => <LogoutButton />,
+        tabBarStyle: Platform.OS === 'web' ? { paddingBottom: 10, height: 62 } : undefined,
       }}
     >
       <Tabs.Screen

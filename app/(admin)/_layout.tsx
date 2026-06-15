@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LogoutButton } from '../../components/LogoutButton';
@@ -12,6 +13,7 @@ export default function AdminLayout() {
         headerTintColor: '#1a1a2e',
         headerTitleStyle: { fontWeight: '700', color: '#1a1a2e' },
         headerRight: () => <LogoutButton />,
+        tabBarStyle: Platform.OS === 'web' ? { paddingBottom: 10, height: 62 } : undefined,
       }}
     >
       <Tabs.Screen
