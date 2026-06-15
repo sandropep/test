@@ -249,19 +249,29 @@ export default function VisitsList() {
           </View>
         ) : Platform.OS === 'web' ? (
           <View style={styles.customDateRow}>
-            <TextInput
-              style={styles.dateInput}
-              value={fmt(fromDate)}
-              onChangeText={v => { if (v) setFromDate(new Date(v + 'T00:00:00')); }}
-              {...{ type: 'date' } as any}
-            />
+            <View style={[styles.datePillBtn, { overflow: 'hidden' } as any]}>
+              <Ionicons name="calendar-outline" size={14} color="#2563eb" />
+              <Text style={styles.datePillText}>{formatDisplay(fromDate)}</Text>
+              <Ionicons name="chevron-down-outline" size={13} color="#2563eb" />
+              <TextInput
+                style={[StyleSheet.absoluteFillObject, { opacity: 0, cursor: 'pointer' } as any]}
+                value={fmt(fromDate)}
+                onChangeText={v => { if (v) setFromDate(new Date(v + 'T00:00:00')); }}
+                {...{ type: 'date', max: fmt(toDate) } as any}
+              />
+            </View>
             <Text style={styles.dateSep}>—</Text>
-            <TextInput
-              style={styles.dateInput}
-              value={fmt(toDate)}
-              onChangeText={v => { if (v) setToDate(new Date(v + 'T00:00:00')); }}
-              {...{ type: 'date' } as any}
-            />
+            <View style={[styles.datePillBtn, { overflow: 'hidden' } as any]}>
+              <Ionicons name="calendar-outline" size={14} color="#2563eb" />
+              <Text style={styles.datePillText}>{formatDisplay(toDate)}</Text>
+              <Ionicons name="chevron-down-outline" size={13} color="#2563eb" />
+              <TextInput
+                style={[StyleSheet.absoluteFillObject, { opacity: 0, cursor: 'pointer' } as any]}
+                value={fmt(toDate)}
+                onChangeText={v => { if (v) setToDate(new Date(v + 'T00:00:00')); }}
+                {...{ type: 'date', min: fmt(fromDate), max: fmt(todayDate()) } as any}
+              />
+            </View>
           </View>
         ) : (
           <View style={styles.customDateRow}>
