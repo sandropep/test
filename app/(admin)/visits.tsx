@@ -13,6 +13,14 @@ const CATEGORY_COLORS: Record<string, string> = {
   A: '#16a34a', B: '#2563eb', C: '#d97706', D: '#dc2626',
 };
 
+function openWebPicker(id: string) {
+  try {
+    const el = (document as any).getElementById(id) as HTMLInputElement | null;
+    if (el?.showPicker) el.showPicker();
+    else el?.click();
+  } catch {}
+}
+
 interface Shop { id: string; shop_number: string; name: string; location: string | null }
 interface Checker { id: string; full_name: string }
 const STATUS_COLORS: Record<string, string> = {
@@ -249,29 +257,31 @@ export default function VisitsList() {
           </View>
         ) : Platform.OS === 'web' ? (
           <View style={styles.customDateRow}>
-            <View style={[styles.datePillBtn, { overflow: 'hidden' } as any]}>
+            <TouchableOpacity style={styles.datePillBtn} onPress={() => openWebPicker('filter-from-date')}>
               <Ionicons name="calendar-outline" size={14} color="#2563eb" />
               <Text style={styles.datePillText}>{formatDisplay(fromDate)}</Text>
               <Ionicons name="chevron-down-outline" size={13} color="#2563eb" />
-              <TextInput
-                style={[StyleSheet.absoluteFillObject, { opacity: 0, cursor: 'pointer' } as any]}
-                value={fmt(fromDate)}
-                onChangeText={v => { if (v) setFromDate(new Date(v + 'T00:00:00')); }}
-                {...{ type: 'date', max: fmt(toDate) } as any}
-              />
-            </View>
+            </TouchableOpacity>
+            <TextInput
+              nativeID="filter-from-date"
+              style={{ position: 'absolute', opacity: 0, width: 1, height: 1 } as any}
+              value={fmt(fromDate)}
+              onChangeText={v => { if (v) setFromDate(new Date(v + 'T00:00:00')); }}
+              {...{ type: 'date', max: fmt(toDate) } as any}
+            />
             <Text style={styles.dateSep}>—</Text>
-            <View style={[styles.datePillBtn, { overflow: 'hidden' } as any]}>
+            <TouchableOpacity style={styles.datePillBtn} onPress={() => openWebPicker('filter-to-date')}>
               <Ionicons name="calendar-outline" size={14} color="#2563eb" />
               <Text style={styles.datePillText}>{formatDisplay(toDate)}</Text>
               <Ionicons name="chevron-down-outline" size={13} color="#2563eb" />
-              <TextInput
-                style={[StyleSheet.absoluteFillObject, { opacity: 0, cursor: 'pointer' } as any]}
-                value={fmt(toDate)}
-                onChangeText={v => { if (v) setToDate(new Date(v + 'T00:00:00')); }}
-                {...{ type: 'date', min: fmt(fromDate), max: fmt(todayDate()) } as any}
-              />
-            </View>
+            </TouchableOpacity>
+            <TextInput
+              nativeID="filter-to-date"
+              style={{ position: 'absolute', opacity: 0, width: 1, height: 1 } as any}
+              value={fmt(toDate)}
+              onChangeText={v => { if (v) setToDate(new Date(v + 'T00:00:00')); }}
+              {...{ type: 'date', min: fmt(fromDate), max: fmt(todayDate()) } as any}
+            />
           </View>
         ) : (
           <View style={styles.customDateRow}>
