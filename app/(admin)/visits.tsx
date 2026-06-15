@@ -367,17 +367,21 @@ export default function VisitsList() {
 
         {/* Status tabs */}
         <View style={styles.statusTabs}>
-          {(['pending', 'approved', 'rejected', 'all'] as const).map(s => (
-            <TouchableOpacity
-              key={s}
-              style={[styles.statusTab, statusFilter === s && { borderBottomColor: STATUS_COLORS[s] ?? '#2563eb', borderBottomWidth: 2 }]}
-              onPress={() => setStatusFilter(s)}
-            >
-              <Text style={[styles.statusTabText, statusFilter === s && { color: STATUS_COLORS[s] ?? '#2563eb', fontWeight: '700' }]}>
-                {s === 'all' ? 'ყველა' : STATUS_LABELS[s]}
-              </Text>
-            </TouchableOpacity>
-          ))}
+          {(['all', 'pending', 'approved', 'rejected'] as const).map(s => {
+            const active = statusFilter === s;
+            const color = STATUS_COLORS[s] ?? '#2563eb';
+            return (
+              <TouchableOpacity
+                key={s}
+                style={[styles.statusTab, active && { backgroundColor: color + '18', borderColor: color }]}
+                onPress={() => setStatusFilter(s)}
+              >
+                <Text style={[styles.statusTabText, active && { color, fontWeight: '700' }]}>
+                  {s === 'all' ? 'ყველა' : STATUS_LABELS[s]}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
 
         {/* Checker row */}
@@ -517,20 +521,23 @@ export default function VisitsList() {
           }
           renderItem={({ item: visit }) => (
             <TouchableOpacity
-              style={styles.visitRow}
+              style={[styles.visitRow, { borderLeftColor: STATUS_COLORS[visit.status] ?? '#e0e0e0' }]}
               onPress={() => router.push(`/(admin)/visit/${visit.id}`)}
               activeOpacity={0.7}
             >
               <View style={styles.visitMain}>
                 <Text style={styles.visitShop}>
-                  #{visit.shops?.shop_number} — {visit.shops?.name}
+                  <Text style={styles.visitShopNum}>#{visit.shops?.shop_number}</Text>
+                  {' — '}{visit.shops?.name}
                 </Text>
                 <Text style={styles.visitMeta}>
                   {checkerMap[visit.checker_id] ?? '—'}  ·  {formatDate(visit.created_at)}
                 </Text>
               </View>
               <View style={styles.visitRight}>
-                <Text style={styles.visitScore}>{visit.score_percent}%</Text>
+                <Text style={[styles.visitScore, { color: CATEGORY_COLORS[visit.category] }]}>
+                  {visit.score_percent}%
+                </Text>
                 <View style={[styles.badge, { backgroundColor: CATEGORY_COLORS[visit.category] + '20' }]}>
                   <Text style={[styles.badgeText, { color: CATEGORY_COLORS[visit.category] }]}>
                     {visit.category}
@@ -566,7 +573,8 @@ const styles = StyleSheet.create({
 
   filterBar: {
     backgroundColor: '#fff', paddingTop: 10, paddingBottom: 8,
-    borderBottomWidth: 1, borderColor: '#eee',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.07, shadowRadius: 8, elevation: 4,
   },
   filterRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
   filterLabel: {
@@ -575,12 +583,13 @@ const styles = StyleSheet.create({
   },
 
   statusTabs: {
-    flexDirection: 'row', borderBottomWidth: 1, borderColor: '#f0f0f0', marginBottom: 6,
+    flexDirection: 'row', gap: 6, paddingHorizontal: 12, paddingBottom: 10, paddingTop: 4,
   },
   statusTab: {
-    flex: 1, paddingVertical: 8, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent',
+    flex: 1, paddingVertical: 7, alignItems: 'center', borderRadius: 20,
+    backgroundColor: '#f0f2f5', borderWidth: 1.5, borderColor: 'transparent',
   },
-  statusTabText: { fontSize: 12, color: '#aaa', fontWeight: '500' },
+  statusTabText: { fontSize: 11, color: '#888', fontWeight: '600' },
 
   datePresetsRow: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
@@ -666,9 +675,11 @@ const styles = StyleSheet.create({
 
   clearBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
-    marginHorizontal: 12, marginTop: 2,
+    marginHorizontal: 12, marginTop: 4, alignSelf: 'flex-start',
+    borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 16,
+    paddingHorizontal: 10, paddingVertical: 5, backgroundColor: '#fafafa',
   },
-  clearBtnText: { fontSize: 13, color: '#2563eb', fontWeight: '600' },
+  clearBtnText: { fontSize: 12, color: '#666', fontWeight: '600' },
 
   modalOverlay: {
     flex: 1, backgroundColor: 'rgba(0,0,0,0.4)',
@@ -720,12 +731,16 @@ const styles = StyleSheet.create({
   visitRow: {
     backgroundColor: '#fff', borderRadius: 12, padding: 14,
     marginBottom: 8, flexDirection: 'row', alignItems: 'center',
+    borderLeftWidth: 3, borderLeftColor: '#e0e0e0',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04, shadowRadius: 4, elevation: 1,
   },
   visitMain: { flex: 1 },
   visitShop: { fontSize: 14, fontWeight: '700', color: '#1a1a2e', marginBottom: 3 },
-  visitMeta: { fontSize: 12, color: '#888' },
+  visitShopNum: { color: '#2563eb', fontWeight: '800' },
+  visitMeta: { fontSize: 12, color: '#aaa' },
   visitRight: { alignItems: 'flex-end', gap: 4, marginHorizontal: 10 },
-  visitScore: { fontSize: 15, fontWeight: '700', color: '#1a1a2e' },
+  visitScore: { fontSize: 16, fontWeight: '800' },
   badge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
   badgeText: { fontSize: 12, fontWeight: '700' },
   deleteBtn: { padding: 6 },

@@ -11,14 +11,21 @@ import {
   Alert,
 } from 'react-native';
 import { supabase } from '../../lib/supabase';
+import { toCheckerEmail } from '../../lib/checkerEmail';
+
+// Admin logs in with a real email; checkers log in with their username (any language, spaces OK).
+function resolveEmail(input: string): string {
+  const v = input.trim();
+  return v.includes('@') ? v.toLowerCase() : toCheckerEmail(v);
+}
 
 export default function LoginScreen() {
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
   async function handleLogin() {
-    if (!email.trim() || !password) {
+    if (!identifier.trim() || !password) {
       if (Platform.OS === 'web') window.alert('შეავსეთ ყველა ველი');
       else Alert.alert('შეცდომა', 'შეავსეთ ყველა ველი');
       return;
@@ -26,7 +33,7 @@ export default function LoginScreen() {
 
     setLoading(true);
     const { error } = await supabase.auth.signInWithPassword({
-      email: email.trim().toLowerCase(),
+      email: resolveEmail(identifier),
       password,
     });
     setLoading(false);
@@ -34,7 +41,7 @@ export default function LoginScreen() {
     if (error) {
       const message =
         error.message === 'Invalid login credentials'
-          ? 'არასწორი ელ. ფოსტა ან პაროლი'
+          ? 'არასწორი სახელი ან პაროლი'
           : 'შეცდომა შესვლისას. სცადეთ თავიდან.';
       if (Platform.OS === 'web') window.alert(message);
       else Alert.alert('შეცდომა', message);
@@ -52,14 +59,13 @@ export default function LoginScreen() {
         <Text style={styles.subtitle}>შედით სისტემაში</Text>
 
         <View style={styles.fieldGroup}>
-          <Text style={styles.label}>ელ. ფოსტა</Text>
+          <Text style={styles.label}>მომხმარებელი</Text>
           <TextInput
             style={styles.input}
-            value={email}
-            onChangeText={setEmail}
-            placeholder="you@example.com"
+            value={identifier}
+            onChangeText={setIdentifier}
+            placeholder="სახელი ან ელ. ფოსტა"
             placeholderTextColor="#aaa"
-            keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
           />

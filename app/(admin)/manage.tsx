@@ -5,9 +5,10 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
+import { toCheckerEmail } from '../../lib/checkerEmail';
 
 interface Shop { id: string; shop_number: string; name: string; location: string | null }
-interface Checker { id: string; full_name: string; email: string }
+interface Checker { id: string; full_name: string }
 
 export default function ManagePage() {
   const [tab, setTab] = useState<'shops' | 'checkers'>('shops');
@@ -26,7 +27,6 @@ export default function ManagePage() {
   const [checkers, setCheckers] = useState<Checker[]>([]);
   const [checkersLoading, setCheckersLoading] = useState(true);
   const [checkerName, setCheckerName] = useState('');
-  const [checkerEmail, setCheckerEmail] = useState('');
   const [checkerPassword, setCheckerPassword] = useState('');
   const [checkerSaving, setCheckerSaving] = useState(false);
   const [deletingChecker, setDeletingChecker] = useState<string | null>(null);
@@ -39,7 +39,7 @@ export default function ManagePage() {
 
   const loadCheckers = useCallback(async () => {
     const { data } = await supabase
-      .from('users').select('id, full_name, email').eq('role', 'checker').order('full_name');
+      .from('users').select('id, full_name').eq('role', 'checker').order('full_name');
     setCheckers((data ?? []) as Checker[]);
   }, []);
 
@@ -93,9 +93,9 @@ export default function ManagePage() {
   }
 
   async function handleAddChecker() {
-    if (!checkerName.trim() || !checkerEmail.trim() || !checkerPassword.trim()) {
-      if (Platform.OS === 'web') window.alert('ყველა ველი სავალდებულოა');
-      else Alert.alert('შეცდომა', 'ყველა ველი სავალდებულოა');
+    if (!checkerName.trim() || !checkerPassword.trim()) {
+      if (Platform.OS === 'web') window.alert('სახელი და პაროლი სავალდებულოა');
+      else Alert.alert('შეცდომა', 'სახელი და პაროლი სავალდებულოა');
       return;
     }
     if (checkerPassword.length < 6) {
@@ -105,11 +105,13 @@ export default function ManagePage() {
     }
     setCheckerSaving(true);
 
+    const generatedEmail = toCheckerEmail(checkerName);
+
     // Save admin session — signUp auto-signs-in the new user, replacing it
     const { data: { session: adminSession } } = await supabase.auth.getSession();
 
     const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: checkerEmail.trim(),
+      email: generatedEmail,
       password: checkerPassword,
     });
 
@@ -140,19 +142,19 @@ export default function ManagePage() {
       const { error: upsertError } = await supabase.from('users').upsert({
         id: userId,
         full_name: checkerName.trim(),
-        email: checkerEmail.trim(),
+        email: generatedEmail,
         role: 'checker',
       }, { onConflict: 'id' });
 
       if (upsertError) {
         await supabase.from('users').update({
           full_name: checkerName.trim(),
-          email: checkerEmail.trim(),
+          email: generatedEmail,
           role: 'checker',
         }).eq('id', userId);
       }
     }
-    setCheckerName(''); setCheckerEmail(''); setCheckerPassword('');
+    setCheckerName(''); setCheckerPassword('');
     await loadCheckers();
     if (Platform.OS === 'web') window.alert('ჩეკერი დამატებულია');
     else Alert.alert('წარმატება', 'ჩეკერი დამატებულია');
@@ -171,7 +173,7 @@ export default function ManagePage() {
       }
       setDeletingChecker(null);
     };
-    const msg = `${checker.full_name} (${checker.email})`;
+    const msg = checker.full_name;
     if (Platform.OS === 'web') {
       if (window.confirm(`წაიშალოს ჩეკერი?\n${msg}`)) doDelete();
     } else {
@@ -276,17 +278,10 @@ export default function ManagePage() {
               style={styles.input}
               value={checkerName}
               onChangeText={setCheckerName}
-              placeholder="სრული სახელი *"
+              placeholder="სახელი (შესვლისთვის) *"
               placeholderTextColor="#aaa"
-            />
-            <TextInput
-              style={styles.input}
-              value={checkerEmail}
-              onChangeText={setCheckerEmail}
-              placeholder="ელ-ფოსტა *"
-              placeholderTextColor="#aaa"
-              keyboardType="email-address"
               autoCapitalize="none"
+              autoCorrect={false}
             />
             <TextInput
               style={styles.input}
@@ -314,7 +309,6 @@ export default function ManagePage() {
                 </View>
                 <View style={styles.listLeft}>
                   <Text style={styles.listPrimary}>{c.full_name || '—'}</Text>
-                  <Text style={styles.listSub}>{c.email}</Text>
                 </View>
                 <TouchableOpacity
                   style={styles.deleteBtn}
