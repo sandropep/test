@@ -33,11 +33,35 @@ interface Visit {
   shops: { shop_number: string; name: string } | null;
 }
 
-const fmt = (d: Date) => d.toISOString().split('T')[0];
-const today = () => new Date();
-const startOfMonth = () => new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+const fmt = (d: Date) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+const todayDate = () => new Date();
 function formatDisplay(d: Date) {
-  return d.toLocaleDateString('ka-GE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  return d.toLocaleDateString('ka-GE', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+type DatePreset = 'today' | 'week' | 'month' | 'last_month' | 'custom';
+const DATE_PRESETS: { key: DatePreset; label: string }[] = [
+  { key: 'today', label: 'დღეს' },
+  { key: 'week', label: '7 დღე' },
+  { key: 'month', label: 'ამ თვეში' },
+  { key: 'last_month', label: 'წინა თვე' },
+  { key: 'custom', label: 'სხვა...' },
+];
+function datesForPreset(preset: DatePreset): { from: Date; to: Date } {
+  const now = todayDate();
+  if (preset === 'today') return { from: new Date(now.getFullYear(), now.getMonth(), now.getDate()), to: now };
+  if (preset === 'week') return { from: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000), to: now };
+  if (preset === 'month') return { from: new Date(now.getFullYear(), now.getMonth(), 1), to: now };
+  if (preset === 'last_month') return {
+    from: new Date(now.getFullYear(), now.getMonth() - 1, 1),
+    to: new Date(now.getFullYear(), now.getMonth(), 0),
+  };
+  return { from: new Date(now.getFullYear(), now.getMonth(), 1), to: now };
 }
 
 export default function VisitsList() {
@@ -49,8 +73,9 @@ export default function VisitsList() {
   const [refreshing, setRefreshing] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
 
-  const [fromDate, setFromDate] = useState<Date>(startOfMonth());
-  const [toDate, setToDate] = useState<Date>(today());
+  const [datePreset, setDatePreset] = useState<DatePreset>('month');
+  const [fromDate, setFromDate] = useState<Date>(() => datesForPreset('month').from);
+  const [toDate, setToDate] = useState<Date>(() => datesForPreset('month').to);
   const [showFromPicker, setShowFromPicker] = useState(false);
   const [showToPicker, setShowToPicker] = useState(false);
 
@@ -192,49 +217,73 @@ export default function VisitsList() {
       {/* ── Filter bar ── */}
       <View style={styles.filterBar}>
 
-        {/* Date row */}
-        <View style={styles.filterRow}>
-          <Text style={styles.filterLabel}>თარიღი</Text>
-          <View style={styles.dateRangeRow}>
-            {Platform.OS === 'web' ? (
-              <>
-                <TextInput
-                  style={styles.dateInput}
-                  value={fmt(fromDate)}
-                  onChangeText={v => { if (v) setFromDate(new Date(v + 'T00:00:00')); }}
-                  {...{ type: 'date' } as any}
-                />
-                <Text style={styles.dateSep}>—</Text>
-                <TextInput
-                  style={styles.dateInput}
-                  value={fmt(toDate)}
-                  onChangeText={v => { if (v) setToDate(new Date(v + 'T00:00:00')); }}
-                  {...{ type: 'date' } as any}
-                />
-              </>
-            ) : (
-              <>
-                <TouchableOpacity style={styles.datePillBtn} onPress={() => setShowFromPicker(true)}>
-                  <Ionicons name="calendar-outline" size={14} color="#2563eb" />
-                  <Text style={styles.datePillText}>{formatDisplay(fromDate)}</Text>
-                </TouchableOpacity>
-                <Text style={styles.dateSep}>—</Text>
-                <TouchableOpacity style={styles.datePillBtn} onPress={() => setShowToPicker(true)}>
-                  <Ionicons name="calendar-outline" size={14} color="#2563eb" />
-                  <Text style={styles.datePillText}>{formatDisplay(toDate)}</Text>
-                </TouchableOpacity>
-                {showFromPicker && (
-                  <DateTimePicker value={fromDate} mode="date" maximumDate={toDate}
-                    onChange={(_, d) => { setShowFromPicker(false); if (d) setFromDate(d); }} />
-                )}
-                {showToPicker && (
-                  <DateTimePicker value={toDate} mode="date" minimumDate={fromDate} maximumDate={today()}
-                    onChange={(_, d) => { setShowToPicker(false); if (d) setToDate(d); }} />
-                )}
-              </>
+        {/* Date preset chips */}
+        <View style={styles.datePresetsRow}>
+          {DATE_PRESETS.map(p => (
+            <TouchableOpacity
+              key={p.key}
+              style={[styles.dateChip, datePreset === p.key && styles.dateChipActive]}
+              onPress={() => {
+                setDatePreset(p.key);
+                if (p.key !== 'custom') {
+                  const { from, to } = datesForPreset(p.key);
+                  setFromDate(from);
+                  setToDate(to);
+                }
+              }}
+            >
+              <Text style={[styles.dateChipText, datePreset === p.key && styles.dateChipTextActive]}>
+                {p.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* Active range display or custom inputs */}
+        {datePreset !== 'custom' ? (
+          <View style={styles.dateRangeDisplay}>
+            <Ionicons name="calendar-outline" size={13} color="#888" />
+            <Text style={styles.dateRangeDisplayText}>
+              {formatDisplay(fromDate)} — {formatDisplay(toDate)}
+            </Text>
+          </View>
+        ) : Platform.OS === 'web' ? (
+          <View style={styles.customDateRow}>
+            <TextInput
+              style={styles.dateInput}
+              value={fmt(fromDate)}
+              onChangeText={v => { if (v) setFromDate(new Date(v + 'T00:00:00')); }}
+              {...{ type: 'date' } as any}
+            />
+            <Text style={styles.dateSep}>—</Text>
+            <TextInput
+              style={styles.dateInput}
+              value={fmt(toDate)}
+              onChangeText={v => { if (v) setToDate(new Date(v + 'T00:00:00')); }}
+              {...{ type: 'date' } as any}
+            />
+          </View>
+        ) : (
+          <View style={styles.customDateRow}>
+            <TouchableOpacity style={styles.datePillBtn} onPress={() => setShowFromPicker(true)}>
+              <Ionicons name="calendar-outline" size={14} color="#2563eb" />
+              <Text style={styles.datePillText}>{formatDisplay(fromDate)}</Text>
+            </TouchableOpacity>
+            <Text style={styles.dateSep}>—</Text>
+            <TouchableOpacity style={styles.datePillBtn} onPress={() => setShowToPicker(true)}>
+              <Ionicons name="calendar-outline" size={14} color="#2563eb" />
+              <Text style={styles.datePillText}>{formatDisplay(toDate)}</Text>
+            </TouchableOpacity>
+            {showFromPicker && (
+              <DateTimePicker value={fromDate} mode="date" maximumDate={toDate}
+                onChange={(_, d) => { setShowFromPicker(false); if (d) setFromDate(d); }} />
+            )}
+            {showToPicker && (
+              <DateTimePicker value={toDate} mode="date" minimumDate={fromDate} maximumDate={todayDate()}
+                onChange={(_, d) => { setShowToPicker(false); if (d) setToDate(d); }} />
             )}
           </View>
-        </View>
+        )}
 
         {/* Status tabs */}
         <View style={styles.statusTabs}>
@@ -457,6 +506,25 @@ const styles = StyleSheet.create({
   },
   statusTabText: { fontSize: 12, color: '#aaa', fontWeight: '500' },
 
+  datePresetsRow: {
+    flexDirection: 'row', gap: 6, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 6,
+  },
+  dateChip: {
+    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20,
+    backgroundColor: '#f0f2f5', borderWidth: 1.5, borderColor: 'transparent',
+  },
+  dateChipActive: { backgroundColor: '#eff6ff', borderColor: '#2563eb' },
+  dateChipText: { fontSize: 12, fontWeight: '600', color: '#888' },
+  dateChipTextActive: { color: '#2563eb' },
+  dateRangeDisplay: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 14, paddingBottom: 8,
+  },
+  dateRangeDisplayText: { fontSize: 12, color: '#888' },
+  customDateRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: 12, paddingBottom: 8,
+  },
   dateRangeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 12 },
   dateSep: { fontSize: 14, color: '#aaa', fontWeight: '600' },
   dateInput: {
