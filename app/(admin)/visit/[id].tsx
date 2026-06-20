@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView, Image, ActivityIndicator,
   Alert, TouchableOpacity, Modal, StatusBar, SafeAreaView, TextInput, Platform,
 } from 'react-native';
-import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../../lib/supabase';
 
@@ -43,7 +43,6 @@ interface PhotoData {
 export default function AdminVisitDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const navigation = useNavigation();
 
   const [visit, setVisit] = useState<VisitData | null>(null);
   const [photos, setPhotos] = useState<PhotoData[]>([]);
@@ -85,16 +84,6 @@ export default function AdminVisitDetail() {
       })));
     }
   }, [id]);
-
-  useEffect(() => {
-    navigation.setOptions({
-      headerLeft: () => (
-        <TouchableOpacity onPress={() => router.replace('/(admin)/visits')} style={{ marginLeft: 8, padding: 4 }}>
-          <Ionicons name="arrow-back" size={24} color="#1a1a2e" />
-        </TouchableOpacity>
-      ),
-    });
-  }, [navigation]);
 
   useEffect(() => {
     load().finally(() => setLoading(false));
@@ -163,6 +152,16 @@ export default function AdminVisitDetail() {
   return (
     <>
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+        {/* Back button */}
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => router.canGoBack() ? router.back() : router.replace('/(admin)/visits')}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="arrow-back" size={18} color="#1a1a2e" />
+          <Text style={styles.backBtnText}>უკან</Text>
+        </TouchableOpacity>
+
         {/* Status banner */}
         <View style={[styles.statusBanner, { backgroundColor: statusColor + '18', borderColor: statusColor + '40' }]}>
           <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
@@ -344,6 +343,15 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f0f2f5' },
   content: { padding: 16, paddingBottom: 48 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+
+  backBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    alignSelf: 'flex-start', marginBottom: 16,
+    paddingVertical: 6, paddingHorizontal: 10,
+    backgroundColor: '#fff', borderRadius: 10,
+    borderWidth: 1, borderColor: '#e0e0e0',
+  },
+  backBtnText: { fontSize: 14, fontWeight: '600', color: '#1a1a2e' },
 
   statusBanner: {
     flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap',

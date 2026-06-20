@@ -1,13 +1,16 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
-  StyleSheet, Alert, Image, ActivityIndicator, Platform, Pressable,
+  StyleSheet, Alert, Image, ActivityIndicator, Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { decode } from 'base64-arraybuffer';
+import { useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabase';
+import { ShopSelector } from '../../components/ShopSelector';
+import type { Shop } from '../../components/ShopSelector';
 
 async function readImageAsBase64(uri: string): Promise<string> {
   if (Platform.OS === 'web') {
@@ -34,16 +37,8 @@ const POSITION_PATH: Record<Position, string> = {
   'თარო': 'shelf',
 };
 
-interface Shop {
-  id: string;
-  shop_number: string;
-  name: string;
-  location: string | null;
-}
-
 export default function NewVisit() {
-  const [shopQuery, setShopQuery] = useState('');
-  const [shopResults, setShopResults] = useState<Shop[]>([]);
+  const router = useRouter();
   const [selectedShop, setSelectedShop] = useState<Shop | null>(null);
   const [ratings, setRatings] = useState<Partial<Record<Position, Rating>>>({});
   const [photos, setPhotos] = useState<Partial<Record<Position, string>>>({});
@@ -54,7 +49,6 @@ export default function NewVisit() {
 
   const clearForm = useCallback(() => {
     setSelectedShop(null);
-    setShopQuery('');
     setRatings({});
     setPhotos({});
     setNotes('');
@@ -84,23 +78,6 @@ export default function NewVisit() {
         .then(({ data }) => setCheckerName(data?.full_name || user.email || 'unknown'));
     });
   }, []);
-
-  // Debounced shop search
-  useEffect(() => {
-    if (shopQuery.length < 2) {
-      setShopResults([]);
-      return;
-    }
-    const t = setTimeout(async () => {
-      const { data } = await supabase
-        .from('shops')
-        .select('id, shop_number, name, location')
-        .or(`shop_number.ilike.%${shopQuery}%,name.ilike.%${shopQuery}%,location.ilike.%${shopQuery}%`)
-        .limit(10);
-      setShopResults(data ?? []);
-    }, 300);
-    return () => clearTimeout(t);
-  }, [shopQuery]);
 
   async function pickPhoto(position: Position) {
     if (Platform.OS === 'web') {
@@ -203,6 +180,16 @@ export default function NewVisit() {
       contentContainerStyle={styles.content}
       keyboardShouldPersistTaps="always"
     >
+      {/* Back button */}
+      <TouchableOpacity
+        style={styles.backBtn}
+        onPress={() => router.canGoBack() ? router.back() : router.replace('/(checker)')}
+        activeOpacity={0.7}
+      >
+        <Ionicons name="arrow-back" size={18} color="#1a1a2e" />
+        <Text style={styles.backBtnText}>უკან</Text>
+      </TouchableOpacity>
+
       {/* Title row with reset button */}
       <View style={styles.titleRow}>
         <TouchableOpacity style={styles.resetBtn} onPress={handleReset} activeOpacity={0.75}>
@@ -213,49 +200,11 @@ export default function NewVisit() {
 
       {/* Shop selector */}
       <Text style={styles.sectionTitle}>მაღაზია</Text>
-      {selectedShop ? (
-        <TouchableOpacity
-          style={styles.selectedShop}
-          onPress={() => { setSelectedShop(null); setShopQuery(''); }}
-        >
-          <View>
-            <Text style={styles.selectedShopPrimary}>
-              #{selectedShop.shop_number} — {selectedShop.name}
-            </Text>
-            {selectedShop.location ? (
-              <Text style={styles.selectedShopSub}>{selectedShop.location}</Text>
-            ) : null}
-          </View>
-          <Text style={styles.changeBtn}>შეცვლა</Text>
-        </TouchableOpacity>
-      ) : (
-        <View>
-          <TextInput
-            style={styles.input}
-            value={shopQuery}
-            onChangeText={setShopQuery}
-            placeholder="ნომერი, სახელი ან მისამართი..."
-            placeholderTextColor="#aaa"
-          />
-          {shopResults.map(shop => (
-            <Pressable
-              key={shop.id}
-              style={styles.shopRow}
-              onPress={() => {
-                setSelectedShop(shop);
-                setShopResults([]);
-                setShopQuery('');
-              }}
-            >
-              <Text style={styles.shopRowNumber}>#{shop.shop_number}</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.shopRowName}>{shop.name}</Text>
-                {shop.location ? <Text style={styles.shopRowLocation} numberOfLines={1}>{shop.location}</Text> : null}
-              </View>
-            </Pressable>
-          ))}
-        </View>
-      )}
+      <ShopSelector
+        selectedShop={selectedShop}
+        onSelect={setSelectedShop}
+        onClear={() => setSelectedShop(null)}
+      />
 
       {/* Ratings + Photos per position */}
       <Text style={[styles.sectionTitle, { marginTop: 24 }]}>შეფასება და ფოტოები</Text>
@@ -321,6 +270,15 @@ export default function NewVisit() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f0f2f5' },
+
+  backBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    alignSelf: 'flex-start', marginBottom: 16,
+    paddingVertical: 6, paddingHorizontal: 10,
+    backgroundColor: '#fff', borderRadius: 10,
+    borderWidth: 1, borderColor: '#e0e0e0',
+  },
+  backBtnText: { fontSize: 14, fontWeight: '600', color: '#1a1a2e' },
   content: { padding: 16, paddingBottom: 48 },
 
   titleRow: {

@@ -9,6 +9,8 @@ import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { decode } from 'base64-arraybuffer';
 import { supabase } from '../../../lib/supabase';
+import { ShopSelector } from '../../../components/ShopSelector';
+import type { Shop } from '../../../components/ShopSelector';
 
 async function readImageAsBase64(uri: string): Promise<string> {
   if (Platform.OS === 'web') {
@@ -46,13 +48,6 @@ function computeScore(r: Partial<Record<Position, Rating>>) {
   };
 }
 
-interface Shop {
-  id: string;
-  shop_number: string;
-  name: string;
-  location: string | null;
-}
-
 interface PhotoState {
   id: string;
   storagePath: string;
@@ -65,8 +60,6 @@ export default function VisitDetail() {
   const router = useRouter();
 
   const [selectedShop, setSelectedShop] = useState<Shop | null>(null);
-  const [shopQuery, setShopQuery] = useState('');
-  const [shopResults, setShopResults] = useState<Shop[]>([]);
   const [date, setDate] = useState('');
   const [ratings, setRatings] = useState<Partial<Record<Position, Rating>>>({});
   const [photos, setPhotos] = useState<Partial<Record<Position, PhotoState>>>({});
@@ -78,20 +71,6 @@ export default function VisitDetail() {
   const [saving, setSaving] = useState(false);
 
   const readOnly = status === 'approved';
-
-  // Debounced shop search
-  useEffect(() => {
-    if (shopQuery.length < 2) { setShopResults([]); return; }
-    const t = setTimeout(async () => {
-      const { data } = await supabase
-        .from('shops')
-        .select('id, shop_number, name, location')
-        .or(`shop_number.ilike.%${shopQuery}%,name.ilike.%${shopQuery}%`)
-        .limit(10);
-      setShopResults(data ?? []);
-    }, 300);
-    return () => clearTimeout(t);
-  }, [shopQuery]);
 
   const load = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -273,6 +252,16 @@ export default function VisitDetail() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      {/* Back button */}
+      <TouchableOpacity
+        style={styles.backBtn}
+        onPress={() => router.canGoBack() ? router.back() : router.replace('/(checker)')}
+        activeOpacity={0.7}
+      >
+        <Ionicons name="arrow-back" size={18} color="#1a1a2e" />
+        <Text style={styles.backBtnText}>უკან</Text>
+      </TouchableOpacity>
+
       {/* Rejection banner */}
       {status === 'rejected' && (
         <View style={styles.rejectionBanner}>
@@ -292,43 +281,12 @@ export default function VisitDetail() {
 
       {/* Shop selector */}
       <Text style={styles.sectionTitle}>მაღაზია</Text>
-      {selectedShop ? (
-        <View style={styles.selectedShop}>
-          <View>
-            <Text style={styles.selectedShopPrimary}>
-              #{selectedShop.shop_number} — {selectedShop.name}
-            </Text>
-            {selectedShop.location ? (
-              <Text style={styles.selectedShopSub}>{selectedShop.location}</Text>
-            ) : null}
-          </View>
-          {!readOnly && (
-            <TouchableOpacity onPress={() => { setSelectedShop(null); setShopQuery(''); }}>
-              <Text style={styles.changeBtn}>შეცვლა</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      ) : (
-        <View style={{ marginBottom: 4 }}>
-          <TextInput
-            style={styles.input}
-            value={shopQuery}
-            onChangeText={setShopQuery}
-            placeholder="ნომერი ან სახელი..."
-            placeholderTextColor="#aaa"
-          />
-          {shopResults.map(shop => (
-            <TouchableOpacity
-              key={shop.id}
-              style={styles.shopRow}
-              onPress={() => { setSelectedShop(shop); setShopResults([]); setShopQuery(''); }}
-            >
-              <Text style={styles.shopRowNumber}>#{shop.shop_number}</Text>
-              <Text style={styles.shopRowName}>{shop.name}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
+      <ShopSelector
+        selectedShop={selectedShop}
+        onSelect={setSelectedShop}
+        onClear={() => setSelectedShop(null)}
+        readOnly={readOnly}
+      />
 
       {/* Date & score row */}
       <View style={styles.metaRow}>
@@ -421,6 +379,15 @@ const styles = StyleSheet.create({
   content: { padding: 16, paddingBottom: 48 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
+  backBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    alignSelf: 'flex-start', marginBottom: 16,
+    paddingVertical: 6, paddingHorizontal: 10,
+    backgroundColor: '#fff', borderRadius: 10,
+    borderWidth: 1, borderColor: '#e0e0e0',
+  },
+  backBtnText: { fontSize: 14, fontWeight: '600', color: '#1a1a2e' },
+
   rejectionBanner: {
     flexDirection: 'row', alignItems: 'flex-start', gap: 10,
     backgroundColor: '#fff5f5', borderRadius: 10, padding: 14,
@@ -442,22 +409,6 @@ const styles = StyleSheet.create({
     fontSize: 11, fontWeight: '700', color: '#888',
     textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8,
   },
-
-  selectedShop: {
-    backgroundColor: '#fff', borderRadius: 10, padding: 14,
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    borderWidth: 1.5, borderColor: '#2563eb', marginBottom: 16,
-  },
-  selectedShopPrimary: { fontWeight: '700', color: '#1a1a2e', fontSize: 15 },
-  selectedShopSub: { color: '#888', fontSize: 13, marginTop: 2 },
-  changeBtn: { color: '#2563eb', fontSize: 13, fontWeight: '600' },
-  shopRow: {
-    backgroundColor: '#fff', paddingHorizontal: 14, paddingVertical: 11,
-    borderBottomWidth: 1, borderColor: '#f0f0f0',
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-  },
-  shopRowNumber: { fontWeight: '700', color: '#2563eb', fontSize: 13, minWidth: 48 },
-  shopRowName: { color: '#333', fontSize: 14, flex: 1 },
 
   metaRow: {
     flexDirection: 'row', justifyContent: 'space-between',

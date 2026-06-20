@@ -10,6 +10,7 @@ import {
   Alert,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -131,21 +132,64 @@ export default function CheckerHome() {
         </TouchableOpacity>
       </View>
 
-      {/* Recent visits */}
+      {/* Rejected visits CTA */}
+      {(() => {
+        const rejected = visits.filter(v => v.status === 'rejected');
+        if (rejected.length === 0) return null;
+        return (
+          <>
+            <View style={styles.ctaHeader}>
+              <Text style={styles.ctaTitle}>გასასწორებელი ვიზიტები</Text>
+              <View style={styles.ctaBadge}>
+                <Text style={styles.ctaBadgeText}>{rejected.length}</Text>
+              </View>
+            </View>
+            {rejected.map(visit => (
+              <TouchableOpacity
+                key={visit.id}
+                style={styles.rejectedCard}
+                onPress={() => router.push(`/(checker)/visit/${visit.id}`)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.rejectedAccent} />
+                <View style={styles.rejectedBody}>
+                  <Text style={styles.rejectedShop} numberOfLines={1}>
+                    #{visit.shops?.shop_number} — {visit.shops?.name}
+                  </Text>
+                  {visit.rejection_note ? (
+                    <Text style={styles.rejectedNote} numberOfLines={2}>
+                      {visit.rejection_note}
+                    </Text>
+                  ) : null}
+                  <Text style={styles.rejectedDate}>{formatDate(visit.created_at)}</Text>
+                </View>
+                <View style={styles.rejectedArrow}>
+                  <Ionicons name="arrow-forward" size={16} color="#dc2626" />
+                </View>
+              </TouchableOpacity>
+            ))}
+          </>
+        );
+      })()}
+
+      {/* Recent visits (non-rejected) */}
       <Text style={styles.sectionTitle}>ბოლო ვიზიტები</Text>
 
-      {visits.length === 0 ? (
-        <View style={styles.emptyBox}>
-          <Text style={styles.emptyText}>ჯერ ვიზიტი არ არის</Text>
-        </View>
-      ) : (
-        visits.map(visit => {
+      {(() => {
+        const recent = visits.filter(v => v.status !== 'rejected');
+        if (recent.length === 0) {
+          return (
+            <View style={styles.emptyBox}>
+              <Text style={styles.emptyText}>ჯერ ვიზიტი არ არის</Text>
+            </View>
+          );
+        }
+        return recent.map(visit => {
           const statusColor = STATUS_COLORS[visit.status] ?? '#888';
-          const isRejected = visit.status === 'rejected';
           return (
             <TouchableOpacity
               key={visit.id}
-              style={[styles.visitRow, isRejected && styles.visitRowRejected]}
+              style={styles.visitRow}
               onPress={() => router.push(`/(checker)/visit/${visit.id}`)}
               activeOpacity={0.7}
             >
@@ -154,11 +198,7 @@ export default function CheckerHome() {
                   #{visit.shops?.shop_number} — {visit.shops?.name}
                 </Text>
                 <Text style={styles.visitDate}>{formatDate(visit.created_at)}</Text>
-                {isRejected && visit.rejection_note ? (
-                  <Text style={styles.rejectionNote} numberOfLines={2}>
-                    ⚠ {visit.rejection_note}
-                  </Text>
-                ) : visit.notes ? (
+                {visit.notes ? (
                   <Text style={styles.visitNotes} numberOfLines={1}>{visit.notes}</Text>
                 ) : null}
               </View>
@@ -173,8 +213,8 @@ export default function CheckerHome() {
               </View>
             </TouchableOpacity>
           );
-        })
-      )}
+        });
+      })()}
     </ScrollView>
   );
 }
@@ -231,9 +271,33 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  visitRowRejected: {
-    borderWidth: 1.5,
-    borderColor: '#dc262640',
+  ctaHeader: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    marginBottom: 10,
+  },
+  ctaTitle: {
+    fontSize: 11, fontWeight: '700', color: '#888',
+    textTransform: 'uppercase', letterSpacing: 0.8,
+  },
+  ctaBadge: {
+    backgroundColor: '#dc2626', borderRadius: 10,
+    paddingHorizontal: 7, paddingVertical: 1,
+  },
+  ctaBadgeText: { fontSize: 11, fontWeight: '800', color: '#fff' },
+
+  rejectedCard: {
+    backgroundColor: '#fff', borderRadius: 14, marginBottom: 10,
+    flexDirection: 'row', alignItems: 'stretch', overflow: 'hidden',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05, shadowRadius: 4, elevation: 1,
+  },
+  rejectedAccent: { width: 4, backgroundColor: '#dc2626' },
+  rejectedBody: { flex: 1, padding: 14, gap: 4 },
+  rejectedShop: { fontSize: 14, fontWeight: '700', color: '#1a1a2e' },
+  rejectedNote: { fontSize: 12, color: '#dc2626', lineHeight: 17 },
+  rejectedDate: { fontSize: 11, color: '#aaa', marginTop: 2 },
+  rejectedArrow: {
+    justifyContent: 'center', paddingHorizontal: 14,
     backgroundColor: '#fff5f5',
   },
   visitLeft: { flex: 1, marginRight: 12 },

@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, ActivityIndicator, Alert, RefreshControl, Platform,
+  Modal, Pressable,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
@@ -22,6 +23,10 @@ export default function ManagePage() {
   const [shopLocation, setShopLocation] = useState('');
   const [shopSaving, setShopSaving] = useState(false);
   const [deletingShop, setDeletingShop] = useState<string | null>(null);
+  const [chainPickerVisible, setChainPickerVisible] = useState(false);
+  const [customChainMode, setCustomChainMode] = useState(false);
+  const [shopSearch, setShopSearch] = useState('');
+  const [shopChainFilter, setShopChainFilter] = useState<string | null>(null);
 
   // ── Checkers ──
   const [checkers, setCheckers] = useState<Checker[]>([]);
@@ -30,6 +35,22 @@ export default function ManagePage() {
   const [checkerPassword, setCheckerPassword] = useState('');
   const [checkerSaving, setCheckerSaving] = useState(false);
   const [deletingChecker, setDeletingChecker] = useState<string | null>(null);
+
+  const shopChains = useMemo(
+    () => Array.from(new Set(shops.map(s => s.name).filter(Boolean))).sort(),
+    [shops]
+  );
+
+  const filteredShops = useMemo(() => {
+    let list = shops;
+    if (shopChainFilter) list = list.filter(s => s.name === shopChainFilter);
+    const q = shopSearch.trim().toLowerCase();
+    if (q) list = list.filter(s =>
+      s.shop_number.toLowerCase().includes(q) ||
+      (s.location ?? '').toLowerCase().includes(q)
+    );
+    return list;
+  }, [shops, shopChainFilter, shopSearch]);
 
   const loadShops = useCallback(async () => {
     const { data } = await supabase
@@ -64,7 +85,7 @@ export default function ManagePage() {
       if (Platform.OS === 'web') window.alert(error.message);
       else Alert.alert('შეცდომა', error.message);
     } else {
-      setShopNumber(''); setShopName(''); setShopLocation('');
+      setShopNumber(''); setShopName(''); setShopLocation(''); setCustomChainMode(false);
       await loadShops();
     }
     setShopSaving(false);
@@ -220,13 +241,62 @@ export default function ManagePage() {
               placeholderTextColor="#aaa"
               keyboardType="numeric"
             />
-            <TextInput
-              style={styles.input}
-              value={shopName}
-              onChangeText={setShopName}
-              placeholder="სახელი *"
-              placeholderTextColor="#aaa"
-            />
+            {customChainMode ? (
+              <View style={styles.customChainRow}>
+                <TextInput
+                  style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                  value={shopName}
+                  onChangeText={setShopName}
+                  placeholder="ქსელის სახელი *"
+                  placeholderTextColor="#aaa"
+                  autoFocus
+                />
+                <TouchableOpacity
+                  style={styles.customChainBack}
+                  onPress={() => { setCustomChainMode(false); setShopName(''); }}
+                >
+                  <Ionicons name="close" size={18} color="#888" />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.chainDropdown}
+                onPress={() => setChainPickerVisible(true)}
+                activeOpacity={0.7}
+              >
+                <Text style={shopName ? styles.chainDropdownValue : styles.chainDropdownPlaceholder}>
+                  {shopName || 'ქსელი *'}
+                </Text>
+                <Ionicons name="chevron-down" size={16} color="#aaa" />
+              </TouchableOpacity>
+            )}
+
+            <Modal visible={chainPickerVisible} transparent animationType="fade">
+              <Pressable style={styles.modalOverlay} onPress={() => setChainPickerVisible(false)}>
+                <Pressable style={styles.modalSheet}>
+                  <Text style={styles.modalTitle}>ქსელის არჩევა</Text>
+                  <ScrollView style={{ maxHeight: 320 }}>
+                    {shopChains.map(c => (
+                      <TouchableOpacity
+                        key={c}
+                        style={[styles.modalRow, shopName === c && styles.modalRowActive]}
+                        onPress={() => { setShopName(c); setChainPickerVisible(false); }}
+                      >
+                        <Text style={styles.modalRowText}>{c}</Text>
+                        {shopName === c && <Ionicons name="checkmark" size={18} color="#2563eb" />}
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                  <TouchableOpacity
+                    style={styles.modalNewChain}
+                    onPress={() => { setChainPickerVisible(false); setCustomChainMode(true); setShopName(''); }}
+                  >
+                    <Ionicons name="add-circle-outline" size={16} color="#2563eb" />
+                    <Text style={styles.modalNewChainText}>ახალი ქსელის დამატება</Text>
+                  </TouchableOpacity>
+                </Pressable>
+              </Pressable>
+            </Modal>
             <TextInput
               style={styles.input}
               value={shopLocation}
@@ -242,10 +312,57 @@ export default function ManagePage() {
             </TouchableOpacity>
           </View>
 
-          <Text style={styles.sectionTitle}>{shops.length} მაღაზია</Text>
+          {/* Search + chain filter */}
+          <View style={styles.searchBar}>
+            <Ionicons name="search-outline" size={15} color="#aaa" />
+            <TextInput
+              style={styles.searchInput}
+              value={shopSearch}
+              onChangeText={setShopSearch}
+              placeholder="ID ან მისამართი..."
+              placeholderTextColor="#aaa"
+              autoCorrect={false}
+              autoCapitalize="none"
+            />
+            {shopSearch.length > 0 && (
+              <TouchableOpacity onPress={() => setShopSearch('')}>
+                <Ionicons name="close-circle" size={16} color="#bbb" />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {shopChains.length > 0 && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.pillsScroll}
+              contentContainerStyle={styles.pillsContent}
+              keyboardShouldPersistTaps="always"
+            >
+              <TouchableOpacity
+                style={[styles.pill, !shopChainFilter && styles.pillActive]}
+                onPress={() => setShopChainFilter(null)}
+              >
+                <Text style={[styles.pillText, !shopChainFilter && styles.pillTextActive]}>ყველა</Text>
+              </TouchableOpacity>
+              {shopChains.map(c => (
+                <TouchableOpacity
+                  key={c}
+                  style={[styles.pill, shopChainFilter === c && styles.pillActive]}
+                  onPress={() => setShopChainFilter(prev => prev === c ? null : c)}
+                >
+                  <Text style={[styles.pillText, shopChainFilter === c && styles.pillTextActive]}>{c}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
+
+          <Text style={styles.sectionTitle}>
+            {filteredShops.length}{filteredShops.length !== shops.length ? `/${shops.length}` : ''} მაღაზია
+          </Text>
           {shopsLoading
             ? <ActivityIndicator color="#2563eb" style={{ marginTop: 24 }} />
-            : shops.map(shop => (
+            : filteredShops.map(shop => (
               <View key={shop.id} style={styles.listRow}>
                 <View style={styles.listLeft}>
                   <Text style={styles.listPrimary}>#{shop.shop_number} — {shop.name}</Text>
@@ -363,6 +480,52 @@ const styles = StyleSheet.create({
     fontSize: 14, color: '#1a1a2e',
     borderWidth: 1, borderColor: '#e0e0e0', marginBottom: 10,
   },
+  chainDropdown: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: '#f0f2f5', borderRadius: 10,
+    paddingHorizontal: 12, paddingVertical: 11,
+    borderWidth: 1, borderColor: '#e0e0e0', marginBottom: 10,
+  },
+  chainDropdownValue: { fontSize: 14, color: '#1a1a2e' },
+  chainDropdownPlaceholder: { fontSize: 14, color: '#aaa' },
+
+  customChainRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+  customChainBack: {
+    padding: 10, backgroundColor: '#f0f2f5', borderRadius: 10,
+    borderWidth: 1, borderColor: '#e0e0e0',
+  },
+
+  modalOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center', alignItems: 'center', padding: 24,
+  },
+  modalSheet: {
+    backgroundColor: '#fff', borderRadius: 16,
+    width: '100%', maxWidth: 360,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15, shadowRadius: 12, elevation: 8,
+    overflow: 'hidden',
+  },
+  modalTitle: {
+    fontSize: 13, fontWeight: '700', color: '#888',
+    textTransform: 'uppercase', letterSpacing: 0.6,
+    paddingHorizontal: 16, paddingVertical: 12,
+    borderBottomWidth: 1, borderColor: '#f0f0f0',
+  },
+  modalRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingVertical: 14,
+    borderBottomWidth: 1, borderColor: '#f5f5f5',
+  },
+  modalRowActive: { backgroundColor: '#eff6ff' },
+  modalRowText: { fontSize: 15, color: '#1a1a2e', fontWeight: '500' },
+  modalNewChain: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: 16, paddingVertical: 14,
+    borderTopWidth: 1, borderColor: '#f0f0f0',
+  },
+  modalNewChainText: { fontSize: 14, color: '#2563eb', fontWeight: '700' },
+
   addBtn: {
     backgroundColor: '#2563eb', borderRadius: 10,
     paddingVertical: 12, flexDirection: 'row',
@@ -388,4 +551,23 @@ const styles = StyleSheet.create({
   listPrimary: { fontSize: 14, fontWeight: '700', color: '#1a1a2e', marginBottom: 2 },
   listSub: { fontSize: 12, color: '#888' },
   deleteBtn: { padding: 6 },
+
+  searchBar: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: '#fff', borderRadius: 12,
+    paddingHorizontal: 14, paddingVertical: 10,
+    borderWidth: 1.5, borderColor: '#e0e0e0',
+    marginBottom: 8,
+  },
+  searchInput: { flex: 1, fontSize: 14, color: '#1a1a2e' },
+
+  pillsScroll: { marginBottom: 10 },
+  pillsContent: { gap: 6, paddingRight: 4, flexDirection: 'row' },
+  pill: {
+    paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20,
+    backgroundColor: '#f0f2f5', borderWidth: 1.5, borderColor: 'transparent',
+  },
+  pillActive: { backgroundColor: '#eff6ff', borderColor: '#2563eb' },
+  pillText: { fontSize: 12, fontWeight: '600', color: '#888' },
+  pillTextActive: { color: '#2563eb' },
 });
