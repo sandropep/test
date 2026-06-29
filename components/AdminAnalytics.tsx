@@ -49,6 +49,13 @@ interface Shop { id: string; shop_number: string; name: string; location: string
 interface VisitRow { date: string; score_percent: number; category: string }
 interface BarItem { value: number; label: string; frontColor: string }
 
+function avgColor(score: number): string {
+  if (score >= 90) return '#16a34a';
+  if (score >= 75) return '#2563eb';
+  if (score >= 60) return '#d97706';
+  return '#dc2626';
+}
+
 function buildChartData(
   visits: VisitRow[], from: Date, to: Date,
   mode: 'perVisit' | 'perDay' | 'perWeek',
@@ -65,30 +72,32 @@ function buildChartData(
   }
 
   if (mode === 'perDay') {
-    const dayMap: Record<string, number> = {};
+    const dayMap: Record<string, number[]> = {};
     const cur = new Date(from); cur.setHours(0, 0, 0, 0);
     const end = new Date(to); end.setHours(0, 0, 0, 0);
-    while (cur <= end) { dayMap[fmtDate(cur)] = 0; cur.setDate(cur.getDate() + 1); }
-    visits.forEach(v => { if (dayMap[v.date] !== undefined) dayMap[v.date]++; });
-    return Object.entries(dayMap).map(([date, count]) => {
+    while (cur <= end) { dayMap[fmtDate(cur)] = []; cur.setDate(cur.getDate() + 1); }
+    visits.forEach(v => { if (dayMap[v.date] !== undefined) dayMap[v.date].push(v.score_percent); });
+    return Object.entries(dayMap).map(([date, scores]) => {
       const d = new Date(date + 'T00:00:00');
-      return { value: count, label: `${d.getDate()}/${d.getMonth() + 1}`, frontColor: '#2563eb' };
+      const avg = scores.length > 0 ? Math.round(scores.reduce((s, n) => s + n, 0) / scores.length) : 0;
+      return { value: avg, label: `${d.getDate()}/${d.getMonth() + 1}`, frontColor: avg > 0 ? avgColor(avg) : '#e0e0e0' };
     });
   }
 
   // perWeek
-  const weekMap: Record<string, number> = {};
+  const weekMap: Record<string, number[]> = {};
   const cur = new Date(getWeekStart(from));
-  while (cur <= to) { weekMap[fmtDate(cur)] = 0; cur.setDate(cur.getDate() + 7); }
+  while (cur <= to) { weekMap[fmtDate(cur)] = []; cur.setDate(cur.getDate() + 7); }
   visits.forEach(v => {
     const ws = fmtDate(getWeekStart(new Date(v.date + 'T00:00:00')));
-    if (weekMap[ws] !== undefined) weekMap[ws]++;
+    if (weekMap[ws] !== undefined) weekMap[ws].push(v.score_percent);
   });
   return Object.entries(weekMap)
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, count]) => {
+    .map(([date, scores]) => {
       const d = new Date(date + 'T00:00:00');
-      return { value: count, label: `${d.getDate()}/${d.getMonth() + 1}`, frontColor: '#2563eb' };
+      const avg = scores.length > 0 ? Math.round(scores.reduce((s, n) => s + n, 0) / scores.length) : 0;
+      return { value: avg, label: `${d.getDate()}/${d.getMonth() + 1}`, frontColor: avg > 0 ? avgColor(avg) : '#e0e0e0' };
     });
 }
 
@@ -148,8 +157,6 @@ export function AdminAnalytics() {
   const daySpan = Math.round((to.getTime() - from.getTime()) / 86400000);
   const mode = selectedShop ? 'perVisit' : daySpan <= 14 ? 'perDay' : 'perWeek';
   const barData = buildChartData(visits, from, to, mode);
-  const maxValue = Math.max(...barData.map(b => b.value), 1);
-
   const totalVisits = visits.length;
   const avgScore = totalVisits > 0
     ? Math.round(visits.reduce((s, v) => s + v.score_percent, 0) / totalVisits)
@@ -162,8 +169,11 @@ export function AdminAnalytics() {
   const itemWidth = Math.floor((chartWidth - 40) / barCount);
   const barWidth = Math.max(12, Math.min(36, itemWidth - 8));
   const spacing = Math.max(4, itemWidth - barWidth);
+  const chartYMax = 100;
 
-  const chartYMax = selectedShop ? 100 : Math.ceil(maxValue * 1.3) || 4;
+  const checkerName = selectedChecker
+    ? (checkers.find(c => c.id === selectedChecker)?.full_name ?? '—')
+    : null;
 
   return (
     <View style={styles.container}>
@@ -171,8 +181,10 @@ export function AdminAnalytics() {
 
       {/* Date presets */}
       <ScrollView
-        horizontal showsHorizontalScrollIndicator={false}
-        style={styles.presetsScroll} contentContainerStyle={styles.presetsContent}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.presetsScroll}
+        contentContainerStyle={styles.presetsContent}
         keyboardShouldPersistTaps="always"
       >
         {PRESETS.map(p => (
@@ -181,8 +193,9 @@ export function AdminAnalytics() {
             style={[styles.preset, preset === p.key && styles.presetActive]}
             onPress={() => {
               setPreset(p.key);
-              const { from: f, to: t } = datesForPreset(p.key);
-              setFrom(f); setTo(t);
+              const dates = datesForPreset(p.key);
+              setFrom(dates.from);
+              setTo(dates.to);
             }}
           >
             <Text style={[styles.presetText, preset === p.key && styles.presetTextActive]}>
@@ -195,17 +208,22 @@ export function AdminAnalytics() {
       {/* Checker filter */}
       <TouchableOpacity style={styles.filterBtn} onPress={() => setCheckerModal(true)}>
         <Ionicons name="person-outline" size={14} color={selectedChecker ? '#2563eb' : '#888'} />
-        <Text style={[styles.filterBtnText, selectedChecker && styles.filterBtnTextActive]} numberOfLines={1}>
-          {selectedChecker ? (checkers.find(c => c.id === selectedChecker)?.full_name ?? '—') : 'ყველა ჩეკერი'}
+        <Text style={[styles.filterBtnText, !!selectedChecker && styles.filterBtnTextActive]} numberOfLines={1}>
+          {checkerName ?? 'ყველა ჩეკერი'}
         </Text>
-        {selectedChecker
-          ? <TouchableOpacity onPress={() => setSelectedChecker(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Ionicons name="close-circle" size={16} color="#2563eb" />
-            </TouchableOpacity>
-          : <Ionicons name="chevron-down" size={14} color="#aaa" />}
+        {selectedChecker ? (
+          <TouchableOpacity
+            onPress={() => setSelectedChecker(null)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="close-circle" size={16} color="#2563eb" />
+          </TouchableOpacity>
+        ) : (
+          <Ionicons name="chevron-down" size={14} color="#aaa" />
+        )}
       </TouchableOpacity>
 
-      {/* Shop filter */}
+      {/* Shop filter — dropdown is absolutely positioned to overlay siblings */}
       <View style={styles.shopWrapper}>
         {selectedShop ? (
           <View style={styles.shopSelected}>
@@ -235,6 +253,7 @@ export function AdminAnalytics() {
             )}
           </View>
         )}
+
         {shopResults.length > 0 && (
           <View style={styles.shopDropdown}>
             {shopResults.map(shop => (
@@ -246,7 +265,9 @@ export function AdminAnalytics() {
                 <Text style={styles.shopDropdownNum}>#{shop.shop_number}</Text>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.shopDropdownName}>{shop.name}</Text>
-                  {shop.location && <Text style={styles.shopDropdownLoc} numberOfLines={1}>{shop.location}</Text>}
+                  {shop.location && (
+                    <Text style={styles.shopDropdownLoc} numberOfLines={1}>{shop.location}</Text>
+                  )}
                 </View>
               </TouchableOpacity>
             ))}
@@ -254,11 +275,11 @@ export function AdminAnalytics() {
         )}
       </View>
 
-      {/* Stats row */}
+      {/* Stats */}
       <View style={styles.statsRow}>
         <View style={styles.statCard}>
           <Text style={styles.statValue}>{totalVisits}</Text>
-          <Text style={styles.statLabel}>დადასტ. ვიზიტი</Text>
+          <Text style={styles.statLabel}>ვიზიტი</Text>
         </View>
         <View style={[styles.statCard, styles.statCardBorder]}>
           <Text style={[styles.statValue, { color: scoreColor }]}>
@@ -361,7 +382,7 @@ const styles = StyleSheet.create({
   filterBtnText: { flex: 1, fontSize: 14, color: '#888', fontWeight: '500' },
   filterBtnTextActive: { color: '#2563eb', fontWeight: '600' },
 
-  shopWrapper: { marginBottom: 14, zIndex: 10 },
+  shopWrapper: { marginBottom: 14, zIndex: 100, position: 'relative' },
   shopSearch: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
     backgroundColor: '#f0f2f5', borderRadius: 10,
@@ -377,10 +398,11 @@ const styles = StyleSheet.create({
   },
   shopSelectedText: { flex: 1, fontSize: 14, color: '#2563eb', fontWeight: '600' },
   shopDropdown: {
-    backgroundColor: '#fff', borderRadius: 8, marginTop: 2,
-    borderWidth: 1, borderColor: '#e0e0e0', elevation: 4,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08, shadowRadius: 8,
+    position: 'absolute', top: 46, left: 0, right: 0, zIndex: 200,
+    backgroundColor: '#fff', borderRadius: 8,
+    borderWidth: 1, borderColor: '#e0e0e0', elevation: 8,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12, shadowRadius: 12,
   },
   shopDropdownRow: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
