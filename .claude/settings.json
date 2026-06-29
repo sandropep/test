@@ -3,7 +3,10 @@
     "allow": [
       "Bash(python -c ' *)",
       "Bash(npm install *)",
-      "Bash(node -e \"const XLSX = require\\('xlsx'\\); const wb = XLSX.readFile\\('visits_all \\(3\\).xlsx'\\); const ws = wb.Sheets[wb.SheetNames[0]]; const data = XLSX.utils.sheet_to_json\\(ws, { header: 1 }\\); console.log\\('Headers:', JSON.stringify\\(data[0]\\)\\); console.log\\('Row 1:', JSON.stringify\\(data[1]\\)\\); console.log\\('Row 2:', JSON.stringify\\(data[2]\\)\\); console.log\\('Total rows:', data.length\\);\")"
+      "Bash(node -e \"const XLSX = require\\('xlsx'\\); const wb = XLSX.readFile\\('visits_all \\(3\\).xlsx'\\); const ws = wb.Sheets[wb.SheetNames[0]]; const data = XLSX.utils.sheet_to_json\\(ws, { header: 1 }\\); console.log\\('Headers:', JSON.stringify\\(data[0]\\)\\); console.log\\('Row 1:', JSON.stringify\\(data[1]\\)\\); console.log\\('Row 2:', JSON.stringify\\(data[2]\\)\\); console.log\\('Total rows:', data.length\\);\")",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)"
     ]
   },
   "enabledPlugins": {

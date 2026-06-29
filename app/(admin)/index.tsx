@@ -6,6 +6,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../../lib/supabase';
+import { AdminAnalytics } from '../../components/AdminAnalytics';
 
 const CATEGORY_COLORS: Record<string, string> = {
   A: '#16a34a', B: '#2563eb', C: '#d97706', D: '#dc2626',
@@ -90,7 +91,7 @@ export default function AdminDashboard() {
         .neq('status', 'rejected'),
     ]);
 
-    setPending((pendingRes.data ?? []) as PendingVisit[]);
+    setPending((pendingRes.data ?? []) as unknown as PendingVisit[]);
     setTodayCount(todayRes.count ?? 0);
     setMonthShopCount(new Set((monthRes.data ?? []).map((v: any) => v.shop_id)).size);
     setTotalShops(shopsRes.count ?? 0);
@@ -303,6 +304,9 @@ export default function AdminDashboard() {
           </View>
         </>
       )}
+
+      {/* ── Analytics ── */}
+      <AdminAnalytics />
 
       {/* ── Link to full visits list ── */}
       <TouchableOpacity
