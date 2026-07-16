@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, Modal, Pressable, TextInput,
   StyleSheet, ActivityIndicator, Dimensions, ScrollView,
@@ -47,7 +47,16 @@ function getWeekStart(d: Date): Date {
 interface Checker { id: string; full_name: string }
 interface Shop { id: string; shop_number: string; name: string; location: string | null }
 interface VisitRow { date: string; score_percent: number; category: string }
-interface BarItem { value: number; label: string; frontColor: string }
+interface BarItem { value: number; label: string; frontColor: string; topLabelComponent?: () => React.ReactNode }
+
+function topLabel(avg: number) {
+  if (avg === 0) return undefined;
+  return () => (
+    <Text style={{ fontSize: 8, fontWeight: '700', color: avgColor(avg), marginBottom: 2 }}>
+      {avg}%
+    </Text>
+  );
+}
 
 function avgColor(score: number): string {
   if (score >= 90) return '#16a34a';
@@ -67,6 +76,7 @@ function buildChartData(
         value: v.score_percent,
         label: `${d.getDate()}/${d.getMonth() + 1}`,
         frontColor: CATEGORY_COLORS[v.category] ?? '#2563eb',
+        topLabelComponent: topLabel(v.score_percent),
       };
     });
   }
@@ -80,7 +90,7 @@ function buildChartData(
     return Object.entries(dayMap).map(([date, scores]) => {
       const d = new Date(date + 'T00:00:00');
       const avg = scores.length > 0 ? Math.round(scores.reduce((s, n) => s + n, 0) / scores.length) : 0;
-      return { value: avg, label: `${d.getDate()}/${d.getMonth() + 1}`, frontColor: avg > 0 ? avgColor(avg) : '#e0e0e0' };
+      return { value: avg, label: `${d.getDate()}/${d.getMonth() + 1}`, frontColor: avg > 0 ? avgColor(avg) : '#e0e0e0', topLabelComponent: topLabel(avg) };
     });
   }
 
@@ -97,7 +107,7 @@ function buildChartData(
     .map(([date, scores]) => {
       const d = new Date(date + 'T00:00:00');
       const avg = scores.length > 0 ? Math.round(scores.reduce((s, n) => s + n, 0) / scores.length) : 0;
-      return { value: avg, label: `${d.getDate()}/${d.getMonth() + 1}`, frontColor: avg > 0 ? avgColor(avg) : '#e0e0e0' };
+      return { value: avg, label: `${d.getDate()}/${d.getMonth() + 1}`, frontColor: avg > 0 ? avgColor(avg) : '#e0e0e0', topLabelComponent: topLabel(avg) };
     });
 }
 
