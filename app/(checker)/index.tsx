@@ -49,6 +49,7 @@ export default function CheckerHome() {
   const router = useRouter();
   const [fullName, setFullName] = useState('');
   const [visits, setVisits] = useState<Visit[]>([]);
+  const [rejectedVisits, setRejectedVisits] = useState<Visit[]>([]);
   const [todayCount, setTodayCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -57,7 +58,7 @@ export default function CheckerHome() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    const [profileRes, visitsRes] = await Promise.all([
+    const [profileRes, visitsRes, rejectedRes] = await Promise.all([
       supabase.from('users').select('full_name').eq('id', user.id).single(),
       supabase
         .from('visits')
@@ -65,12 +66,20 @@ export default function CheckerHome() {
         .eq('checker_id', user.id)
         .order('created_at', { ascending: false })
         .limit(30),
+      supabase
+        .from('visits')
+        .select('id, date, created_at, score_percent, category, status, rejection_note, notes, shops(shop_number, name)')
+        .eq('checker_id', user.id)
+        .eq('status', 'rejected')
+        .order('created_at', { ascending: false })
+        .limit(50),
     ]);
 
     if (profileRes.data) setFullName(profileRes.data.full_name);
 
     const allVisits = (visitsRes.data as unknown as Visit[]) ?? [];
     setVisits(allVisits);
+    setRejectedVisits((rejectedRes.data as unknown as Visit[]) ?? []);
 
     const today = new Date().toISOString().split('T')[0];
     setTodayCount(allVisits.filter(v => v.date === today).length);
@@ -134,7 +143,7 @@ export default function CheckerHome() {
 
       {/* Rejected visits CTA */}
       {(() => {
-        const rejected = visits.filter(v => v.status === 'rejected');
+        const rejected = rejectedVisits;
         if (rejected.length === 0) return null;
         return (
           <>

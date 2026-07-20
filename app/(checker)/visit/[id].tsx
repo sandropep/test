@@ -9,6 +9,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { decode } from 'base64-arraybuffer';
 import { supabase } from '../../../lib/supabase';
+import { getSignedUrls } from '../../../lib/signedUrlCache';
 import { ShopSelector } from '../../../components/ShopSelector';
 import type { Shop } from '../../../components/ShopSelector';
 
@@ -64,6 +65,7 @@ export default function VisitDetail() {
 
   const [selectedShop, setSelectedShop] = useState<Shop | null>(null);
   const [date, setDate] = useState('');
+  const [createdAt, setCreatedAt] = useState('');
   const [ratings, setRatings] = useState<Partial<Record<Position, Rating>>>({});
   const [photos, setPhotos] = useState<Partial<Record<Position, PhotoEntry[]>>>({});
   const [notes, setNotes] = useState('');
@@ -100,6 +102,7 @@ export default function VisitDetail() {
     const shop = visit.shops as any;
     setSelectedShop(shop ?? null);
     setDate(visit.date);
+    setCreatedAt(visit.created_at);
     setNotes(visit.notes ?? '');
     setStatus(visit.status ?? 'pending');
     setRejectionNote(visit.rejection_note ?? null);
@@ -113,13 +116,7 @@ export default function VisitDetail() {
       .from('photos').select('id, position, storage_path').eq('visit_id', id);
 
     if (photoRows && photoRows.length > 0) {
-      const { data: signedUrls } = await supabase.storage
-        .from('photos')
-        .createSignedUrls(photoRows.map(r => r.storage_path), 3600);
-
-      const urlMap = Object.fromEntries(
-        (signedUrls ?? []).map(s => [s.path, s.signedUrl])
-      );
+      const urlMap = await getSignedUrls(photoRows.map(r => r.storage_path));
 
       const state: Partial<Record<Position, PhotoEntry[]>> = {};
       photoRows.forEach(row => {
@@ -382,6 +379,7 @@ export default function VisitDetail() {
           {new Date(date).toLocaleDateString('ka-GE', {
             day: 'numeric', month: 'long', year: 'numeric',
           })}
+          {createdAt ? `, ${new Date(createdAt).getHours().toString().padStart(2, '0')}:${new Date(createdAt).getMinutes().toString().padStart(2, '0')}` : ''}
         </Text>
         <View style={[styles.badge, { backgroundColor: CATEGORY_COLORS[cat] + '20' }]}>
           <Text style={[styles.badgeText, { color: CATEGORY_COLORS[cat] }]}>

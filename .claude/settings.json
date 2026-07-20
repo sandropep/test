@@ -11,7 +11,8 @@
       "Bash(command -v wkhtmltopdf)",
       "Bash(command -v chrome)",
       "Bash(command -v msedge)",
-      "Bash(where pandoc *)"
+      "Bash(where pandoc *)",
+      "Bash(npm run *)"
     ]
   },
   "enabledPlugins": {

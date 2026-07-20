@@ -35,6 +35,15 @@ export default function AdminLayout() {
         }}
       />
       <Tabs.Screen
+        name="analytics"
+        options={{
+          title: 'ანალიტიკა',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="stats-chart-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="manage"
         options={{
           title: 'მართვა',
@@ -53,7 +62,11 @@ export default function AdminLayout() {
       />
       <Tabs.Screen
         name="shop/[id]"
-        options={{ href: null }}
+        options={{
+          href: null,
+          title: 'მაღაზია',
+          tabBarStyle: { display: 'none' },
+        }}
       />
     </Tabs>
   );

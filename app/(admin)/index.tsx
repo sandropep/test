@@ -1,12 +1,12 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   ActivityIndicator, Alert, Platform, RefreshControl,
 } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../../lib/supabase';
-import { AdminAnalytics } from '../../components/AdminAnalytics';
 
 const CATEGORY_COLORS: Record<string, string> = {
   A: '#16a34a', B: '#2563eb', C: '#d97706', D: '#dc2626',
@@ -15,6 +15,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 interface PendingVisit {
   id: string;
   date: string;
+  created_at: string;
   score_percent: number;
   category: string;
   shops: { shop_number: string; name: string; location: string | null } | null;
@@ -29,7 +30,19 @@ interface CheckerRow {
   avgCategory: string | null;
 }
 
+type ActivityPeriod = 'today' | 'week' | 'month' | 'all' | 'custom';
+
 const fmt = (d: Date) => d.toISOString().split('T')[0];
+function formatDateTime(createdAt: string) {
+  const d = new Date(createdAt);
+  const month = d.toLocaleDateString('ka-GE', { month: 'short' });
+  const h = d.getHours().toString().padStart(2, '0');
+  const m = d.getMinutes().toString().padStart(2, '0');
+  return `${d.getDate()} ${month} ${h}:${m}`;
+}
+function formatDateShort(d: Date) {
+  return d.toLocaleDateString('ka-GE', { day: '2-digit', month: 'short' });
+}
 const startOfMonth = () => new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 function startOfWeek() {
   const d = new Date();
@@ -48,20 +61,71 @@ export default function AdminDashboard() {
   const [todayCount, setTodayCount] = useState(0);
   const [monthShopCount, setMonthShopCount] = useState(0);
   const [totalShops, setTotalShops] = useState(0);
+  const [monthVisitCount, setMonthVisitCount] = useState(0);
+  const [monthAvgScore, setMonthAvgScore] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [checkersList, setCheckersList] = useState<{ id: string; full_name: string }[]>([]);
+  const [activityPeriod, setActivityPeriod] = useState<ActivityPeriod>('week');
   const [checkerActivity, setCheckerActivity] = useState<CheckerRow[]>([]);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityFrom, setActivityFrom] = useState<Date>(() => startOfWeek());
+  const [activityTo, setActivityTo] = useState<Date>(() => new Date());
+  const [showActFromPicker, setShowActFromPicker] = useState(false);
+  const [showActToPicker, setShowActToPicker] = useState(false);
+  const actFromPickerEl = useRef<HTMLInputElement | null>(null);
+  const actToPickerEl = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const mkInput = (onChange: (v: string) => void) => {
+      const el = document.createElement('input');
+      el.type = 'date';
+      el.style.cssText = 'position:fixed;left:0;top:0;opacity:0;width:1px;height:1px;pointer-events:none;';
+      el.addEventListener('change', () => { if (el.value) onChange(el.value); });
+      document.body.appendChild(el);
+      return el;
+    };
+    actFromPickerEl.current = mkInput(v => setActivityFrom(new Date(v + 'T00:00:00')));
+    actToPickerEl.current = mkInput(v => setActivityTo(new Date(v + 'T00:00:00')));
+    return () => {
+      actFromPickerEl.current?.remove();
+      actToPickerEl.current?.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    if (actFromPickerEl.current) { actFromPickerEl.current.value = fmt(activityFrom); actFromPickerEl.current.max = fmt(activityTo); }
+    if (actToPickerEl.current) { actToPickerEl.current.value = fmt(activityTo); actToPickerEl.current.min = fmt(activityFrom); actToPickerEl.current.max = fmt(new Date()); }
+  }, [activityFrom, activityTo]);
+
+  function openActFromPicker() {
+    const el = actFromPickerEl.current;
+    if (!el) return;
+    el.style.pointerEvents = 'auto';
+    el.focus();
+    try { (el as any).showPicker(); } catch { el.click(); }
+    el.style.pointerEvents = 'none';
+  }
+  function openActToPicker() {
+    const el = actToPickerEl.current;
+    if (!el) return;
+    el.style.pointerEvents = 'auto';
+    el.focus();
+    try { (el as any).showPicker(); } catch { el.click(); }
+    el.style.pointerEvents = 'none';
+  }
 
   const load = useCallback(async () => {
     const todayStr = fmt(new Date());
     const monthStart = fmt(startOfMonth());
-    const weekStart = fmt(startOfWeek());
 
-    const [pendingRes, todayRes, monthRes, shopsRes, checkersRes, weekVisitsRes] = await Promise.all([
+    const [pendingRes, todayRes, monthRes, shopsRes, checkersRes] = await Promise.all([
       supabase
         .from('visits')
-        .select('id, date, score_percent, category, shops(shop_number, name, location), checker:checker_id(full_name)')
+        .select('id, date, created_at, score_percent, category, shops(shop_number, name, location), checker:checker_id(full_name)')
         .eq('status', 'pending')
         .order('date', { ascending: false })
         .limit(50),
@@ -71,7 +135,7 @@ export default function AdminDashboard() {
         .eq('date', todayStr),
       supabase
         .from('visits')
-        .select('shop_id')
+        .select('shop_id, score_percent')
         .gte('date', monthStart)
         .lte('date', todayStr)
         .neq('status', 'rejected'),
@@ -83,29 +147,59 @@ export default function AdminDashboard() {
         .select('id, full_name')
         .eq('role', 'checker')
         .order('full_name'),
-      supabase
-        .from('visits')
-        .select('checker_id, score_percent, category')
-        .gte('date', weekStart)
-        .lte('date', todayStr)
-        .neq('status', 'rejected'),
     ]);
+
+    const monthVisits = monthRes.data ?? [];
+    const monthScores = monthVisits.map((v: any) => v.score_percent).filter((s: any) => s != null);
 
     setPending((pendingRes.data ?? []) as unknown as PendingVisit[]);
     setTodayCount(todayRes.count ?? 0);
-    setMonthShopCount(new Set((monthRes.data ?? []).map((v: any) => v.shop_id)).size);
+    setMonthShopCount(new Set(monthVisits.map((v: any) => v.shop_id)).size);
     setTotalShops(shopsRes.count ?? 0);
+    setMonthVisitCount(monthVisits.length);
+    setMonthAvgScore(monthScores.length > 0 ? Math.round(monthScores.reduce((s: number, n: number) => s + n, 0) / monthScores.length) : null);
+    setCheckersList((checkersRes.data ?? []) as { id: string; full_name: string }[]);
+  }, []);
 
-    // Build checker activity rows
-    const weekVisits = weekVisitsRes.data ?? [];
+  const loadCheckerActivity = useCallback(async (
+    period: ActivityPeriod,
+    checkersForRows: { id: string; full_name: string }[],
+    customFrom: Date,
+    customTo: Date,
+  ) => {
+    if (!checkersForRows.length) {
+      setCheckerActivity([]);
+      return;
+    }
+    setActivityLoading(true);
+    const todayStr = fmt(new Date());
+
+    let query = supabase
+      .from('visits')
+      .select('checker_id, score_percent, category')
+      .neq('status', 'rejected');
+
+    if (period === 'today') {
+      query = query.eq('date', todayStr);
+    } else if (period === 'week') {
+      query = query.gte('date', fmt(startOfWeek())).lte('date', todayStr);
+    } else if (period === 'month') {
+      query = query.gte('date', fmt(startOfMonth())).lte('date', todayStr);
+    } else if (period === 'custom') {
+      query = query.gte('date', fmt(customFrom)).lte('date', fmt(customTo));
+    }
+    // 'all' → no date filter
+
+    const { data } = await query;
+
     const byChecker: Record<string, { scores: number[]; categories: string[] }> = {};
-    weekVisits.forEach((v: any) => {
+    (data ?? []).forEach((v: any) => {
       if (!byChecker[v.checker_id]) byChecker[v.checker_id] = { scores: [], categories: [] };
       if (v.score_percent != null) byChecker[v.checker_id].scores.push(v.score_percent);
       if (v.category) byChecker[v.checker_id].categories.push(v.category);
     });
 
-    const rows: CheckerRow[] = (checkersRes.data ?? []).map((c: any) => {
+    const rows: CheckerRow[] = checkersForRows.map(c => {
       const entry = byChecker[c.id];
       const scores = entry?.scores ?? [];
       const avgScore = scores.length > 0 ? Math.round(scores.reduce((s, n) => s + n, 0) / scores.length) : null;
@@ -116,12 +210,17 @@ export default function AdminDashboard() {
 
     rows.sort((a, b) => b.visitCount - a.visitCount);
     setCheckerActivity(rows);
+    setActivityLoading(false);
   }, []);
 
   useFocusEffect(useCallback(() => {
     setLoading(true);
     load().finally(() => setLoading(false));
   }, [load]));
+
+  useEffect(() => {
+    loadCheckerActivity(activityPeriod, checkersList, activityFrom, activityTo);
+  }, [activityPeriod, checkersList, activityFrom, activityTo, loadCheckerActivity]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -181,7 +280,20 @@ export default function AdminDashboard() {
         <View style={styles.statCard}>
           <Text style={[styles.statValue, { color: '#16a34a' }]}>{monthShopCount}</Text>
           <Text style={styles.statLabel}>მაღაზია</Text>
-          <Text style={styles.statSub}>სულ {totalShops}</Text>
+          <Text style={styles.statSub}>სულ {totalShops} მაღაზიიდან</Text>
+        </View>
+
+        <View style={styles.statCard}>
+          <Text style={[styles.statValue, { color: '#7c3aed' }]}>{monthVisitCount}</Text>
+          <Text style={styles.statLabel}>ვიზიტი ამ თვეს</Text>
+          <Text style={[
+            styles.statSub,
+            monthAvgScore != null && { color: CATEGORY_COLORS[
+              monthAvgScore >= 90 ? 'A' : monthAvgScore >= 75 ? 'B' : monthAvgScore >= 60 ? 'C' : 'D'
+            ], fontWeight: '700' },
+          ]}>
+            {monthAvgScore != null ? `საშ. ქულა ${monthAvgScore}%` : 'ქულა არ არის'}
+          </Text>
         </View>
       </View>
 
@@ -236,7 +348,7 @@ export default function AdminDashboard() {
                   <Text style={styles.visitMetaDot}>·</Text>
                   <Ionicons name="calendar-outline" size={11} color="#bbb" />
                   <Text style={styles.visitMetaText}>
-                    {new Date(visit.date).toLocaleDateString('ka-GE', { day: 'numeric', month: 'short' })}
+                    {formatDateTime(visit.created_at)}
                   </Text>
                 </View>
               </View>
@@ -254,7 +366,7 @@ export default function AdminDashboard() {
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.viewBtn}
-                  onPress={() => router.push(`/(admin)/visit/${visit.id}` as any)}
+                  onPress={() => router.push(`/(admin)/visit/${visit.id}?from=dashboard` as any)}
                   activeOpacity={0.7}
                 >
                   <Ionicons name="arrow-forward" size={16} color="#2563eb" />
@@ -270,8 +382,70 @@ export default function AdminDashboard() {
         <>
           <View style={[styles.sectionHeader, { marginTop: 24 }]}>
             <Text style={styles.sectionTitle}>ჩეკერების აქტივობა</Text>
-            <Text style={styles.sectionSub}>ეს კვირა</Text>
+            {activityLoading && <ActivityIndicator size="small" color="#2563eb" />}
           </View>
+
+          <View style={styles.periodRow}>
+            {(['today', 'week', 'month', 'all'] as const).map(p => (
+              <TouchableOpacity
+                key={p}
+                style={[styles.periodPill, activityPeriod === p && styles.periodPillActive]}
+                onPress={() => setActivityPeriod(p)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.periodPillText, activityPeriod === p && styles.periodPillTextActive]}>
+                  {p === 'today' ? 'დღეს' : p === 'week' ? 'ეს კვირა' : p === 'month' ? 'ეს თვე' : 'ყველა'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity
+              style={[styles.periodPill, styles.periodPillIcon, activityPeriod === 'custom' && styles.periodPillActive]}
+              onPress={() => setActivityPeriod('custom')}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="calendar-outline" size={14} color={activityPeriod === 'custom' ? '#2563eb' : '#888'} />
+            </TouchableOpacity>
+          </View>
+
+          {activityPeriod === 'custom' && (
+            <View style={styles.customDateRow}>
+              <TouchableOpacity
+                style={styles.miniDatePill}
+                onPress={Platform.OS === 'web' ? openActFromPicker : () => setShowActFromPicker(true)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.miniDatePillIcon}>
+                  <Ionicons name="calendar-outline" size={13} color="#2563eb" />
+                </View>
+                <View>
+                  <Text style={styles.miniDatePillLabel}>დან</Text>
+                  <Text suppressHydrationWarning style={styles.miniDatePillValue}>{formatDateShort(activityFrom)}</Text>
+                </View>
+              </TouchableOpacity>
+              <Ionicons name="arrow-forward-outline" size={14} color="#cbd5e1" />
+              <TouchableOpacity
+                style={styles.miniDatePill}
+                onPress={Platform.OS === 'web' ? openActToPicker : () => setShowActToPicker(true)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.miniDatePillIcon}>
+                  <Ionicons name="calendar-outline" size={13} color="#2563eb" />
+                </View>
+                <View>
+                  <Text style={styles.miniDatePillLabel}>მდე</Text>
+                  <Text suppressHydrationWarning style={styles.miniDatePillValue}>{formatDateShort(activityTo)}</Text>
+                </View>
+              </TouchableOpacity>
+              {Platform.OS !== 'web' && showActFromPicker && (
+                <DateTimePicker value={activityFrom} mode="date" maximumDate={activityTo}
+                  onChange={(_, d) => { setShowActFromPicker(false); if (d) setActivityFrom(d); }} />
+              )}
+              {Platform.OS !== 'web' && showActToPicker && (
+                <DateTimePicker value={activityTo} mode="date" minimumDate={activityFrom} maximumDate={new Date()}
+                  onChange={(_, d) => { setShowActToPicker(false); if (d) setActivityTo(d); }} />
+              )}
+            </View>
+          )}
 
           <View style={styles.checkerCard}>
             {checkerActivity.map((c, i) => {
@@ -304,9 +478,6 @@ export default function AdminDashboard() {
           </View>
         </>
       )}
-
-      {/* ── Analytics ── */}
-      <AdminAnalytics />
 
       {/* ── Link to full visits list ── */}
       <TouchableOpacity
@@ -392,7 +563,33 @@ const styles = StyleSheet.create({
     backgroundColor: '#eff6ff', justifyContent: 'center', alignItems: 'center',
   },
 
-  sectionSub: { fontSize: 11, color: '#bbb', fontWeight: '600', marginLeft: 4 },
+  periodRow: { flexDirection: 'row', gap: 8, marginBottom: 10, flexWrap: 'wrap' },
+  periodPill: {
+    paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20,
+    backgroundColor: '#f0f2f5', borderWidth: 1.5, borderColor: 'transparent',
+  },
+  periodPillActive: { backgroundColor: '#eff6ff', borderColor: '#2563eb' },
+  periodPillText: { fontSize: 12, fontWeight: '600', color: '#888' },
+  periodPillTextActive: { color: '#2563eb' },
+  periodPillIcon: { paddingHorizontal: 10, justifyContent: 'center', alignItems: 'center' },
+
+  customDateRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10,
+  },
+  miniDatePill: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: '#fff', borderRadius: 12,
+    paddingHorizontal: 10, paddingVertical: 8,
+    borderWidth: 1.5, borderColor: '#dbeafe',
+    shadowColor: '#2563eb', shadowOpacity: 0.06, shadowRadius: 6, shadowOffset: { width: 0, height: 2 },
+    elevation: 1,
+  },
+  miniDatePillIcon: {
+    width: 24, height: 24, borderRadius: 6,
+    backgroundColor: '#eff6ff', alignItems: 'center', justifyContent: 'center',
+  },
+  miniDatePillLabel: { fontSize: 8, color: '#93c5fd', fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6 },
+  miniDatePillValue: { fontSize: 12, color: '#1e40af', fontWeight: '700', marginTop: 1 },
 
   checkerCard: {
     backgroundColor: '#fff', borderRadius: 14, overflow: 'hidden',
