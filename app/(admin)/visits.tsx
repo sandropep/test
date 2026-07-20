@@ -31,6 +31,7 @@ interface Visit {
   category: string;
   checker_id: string;
   status: string;
+  notes: string | null;
   shops: { shop_number: string; name: string; location: string | null } | null;
 }
 
@@ -167,7 +168,7 @@ export default function VisitsList() {
   const buildQuery = useCallback(() => {
     let q = supabase
       .from('visits')
-      .select('id, date, created_at, score_percent, category, checker_id, status, shops(shop_number, name, location)')
+      .select('id, date, created_at, score_percent, category, checker_id, status, notes, shops(shop_number, name, location)')
       .order('created_at', { ascending: false });
     q = q.gte('date', fmt(fromDate));
     q = q.lte('date', fmt(toDate));
@@ -559,11 +560,18 @@ export default function VisitsList() {
                   {' — '}{visit.shops?.name}
                 </Text>
                 {visit.shops?.location ? (
-                  <Text style={styles.visitAddress} numberOfLines={1}>{visit.shops.location}</Text>
+                  <Text style={styles.visitAddress} numberOfLines={1}>
+                    <Text style={styles.visitFieldLabel}>მისამართი: </Text>{visit.shops.location}
+                  </Text>
                 ) : null}
                 <Text style={styles.visitMeta}>
                   {checkerMap[visit.checker_id] ?? '—'}  ·  {formatDate(visit.created_at)}
                 </Text>
+                {visit.notes ? (
+                  <Text style={styles.visitNote} numberOfLines={2}>
+                    <Text style={styles.visitFieldLabel}>შენიშვნა: </Text>{visit.notes}
+                  </Text>
+                ) : null}
               </View>
               <View style={styles.visitRight}>
                 <Text style={[styles.visitScore, { color: CATEGORY_COLORS[visit.category] }]}>
@@ -771,6 +779,8 @@ const styles = StyleSheet.create({
   visitShopNum: { color: '#2563eb', fontWeight: '800' },
   visitAddress: { fontSize: 12, color: '#999', marginTop: 1 },
   visitMeta: { fontSize: 12, color: '#aaa' },
+  visitNote: { fontSize: 12, color: '#999', fontStyle: 'italic', marginTop: 4 },
+  visitFieldLabel: { fontWeight: '700', color: '#888', fontStyle: 'normal' },
   visitRight: { alignItems: 'flex-end', gap: 4, marginHorizontal: 10 },
   visitScore: { fontSize: 16, fontWeight: '800' },
   badge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },

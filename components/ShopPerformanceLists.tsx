@@ -20,6 +20,8 @@ interface ShopTrendRow {
 
 type Bucket = 'low' | 'deteriorated' | 'improving';
 
+const PAGE_SIZE = 10;
+
 export function ShopPerformanceLists() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -27,6 +29,7 @@ export function ShopPerformanceLists() {
   const [deteriorated, setDeteriorated] = useState<ShopTrendRow[]>([]);
   const [improving, setImproving] = useState<ShopTrendRow[]>([]);
   const [expanded, setExpanded] = useState<Record<Bucket, boolean>>({ low: true, deteriorated: true, improving: true });
+  const [visibleCount, setVisibleCount] = useState<Record<Bucket, number>>({ low: PAGE_SIZE, deteriorated: PAGE_SIZE, improving: PAGE_SIZE });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -78,6 +81,7 @@ export function ShopPerformanceLists() {
     setLowPerformers(low);
     setDeteriorated(det);
     setImproving(imp);
+    setVisibleCount({ low: PAGE_SIZE, deteriorated: PAGE_SIZE, improving: PAGE_SIZE });
     setLoading(false);
   }, []);
 
@@ -107,7 +111,7 @@ export function ShopPerformanceLists() {
             <Text style={styles.emptyText}>მაღაზია არ მოიძებნა</Text>
           ) : (
             <View style={styles.shopList}>
-              {data.map(row => (
+              {data.slice(0, visibleCount[bucket]).map(row => (
                 <TouchableOpacity
                   key={row.shopId}
                   style={styles.shopCard}
@@ -121,7 +125,9 @@ export function ShopPerformanceLists() {
                         #{row.shop.shop_number} — {row.shop.name}
                       </Text>
                       {row.shop.location ? (
-                        <Text style={styles.shopAddress} numberOfLines={1}>{row.shop.location}</Text>
+                        <Text style={styles.shopAddress} numberOfLines={1}>
+                          <Text style={styles.shopFieldLabel}>მისამართი: </Text>{row.shop.location}
+                        </Text>
                       ) : null}
                       <View style={styles.trailRow}>
                         {row.visits.map((v, i) => (
@@ -142,6 +148,18 @@ export function ShopPerformanceLists() {
                   </View>
                 </TouchableOpacity>
               ))}
+              {visibleCount[bucket] < data.length && (
+                <TouchableOpacity
+                  style={[styles.loadMoreBtn, { borderColor: color + '40' }]}
+                  onPress={() => setVisibleCount(prev => ({ ...prev, [bucket]: prev[bucket] + PAGE_SIZE }))}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.loadMoreText, { color }]}>
+                    მეტის ნახვა ({data.length - visibleCount[bucket]})
+                  </Text>
+                  <Ionicons name="chevron-down" size={14} color={color} />
+                </TouchableOpacity>
+              )}
             </View>
           )
         )}
@@ -203,9 +221,16 @@ const styles = StyleSheet.create({
   },
   shopName: { fontSize: 15, fontWeight: '800', color: '#1a1a2e' },
   shopAddress: { fontSize: 12, color: '#999', marginTop: 2, fontWeight: '500' },
+  shopFieldLabel: { fontWeight: '700', color: '#888' },
   trailRow: { flexDirection: 'row', alignItems: 'center', marginTop: 6 },
   trailItem: { flexDirection: 'row', alignItems: 'center' },
   trailCat: { fontSize: 13, fontWeight: '800' },
   catBadge: { borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, minWidth: 36, alignItems: 'center' },
   catBadgeText: { fontSize: 16, fontWeight: '800', color: '#fff' },
+
+  loadMoreBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    paddingVertical: 10, borderRadius: 10, borderWidth: 1.5, marginTop: 2,
+  },
+  loadMoreText: { fontSize: 13, fontWeight: '700' },
 });

@@ -12,6 +12,7 @@ import { supabase } from '../../../lib/supabase';
 import { getSignedUrls } from '../../../lib/signedUrlCache';
 import { ShopSelector } from '../../../components/ShopSelector';
 import type { Shop } from '../../../components/ShopSelector';
+import { PhotoSourceModal } from '../../../components/PhotoSourceModal';
 
 async function readImageAsBase64(uri: string): Promise<string> {
   if (Platform.OS === 'web') {
@@ -68,6 +69,7 @@ export default function VisitDetail() {
   const [createdAt, setCreatedAt] = useState('');
   const [ratings, setRatings] = useState<Partial<Record<Position, Rating>>>({});
   const [photos, setPhotos] = useState<Partial<Record<Position, PhotoEntry[]>>>({});
+  const [pickerTarget, setPickerTarget] = useState<{ position: Position; index: number | null } | null>(null);
   const [notes, setNotes] = useState('');
   const [checkerName, setCheckerName] = useState('');
   const [status, setStatus] = useState('pending');
@@ -138,18 +140,30 @@ export default function VisitDetail() {
     load().finally(() => setLoading(false));
   }, [load]);
 
-  async function replacePhoto(position: Position, index: number) {
-    const updateEntry = (uri: string) => {
-      setPhotos(prev => {
-        const arr = [...(prev[position] ?? [])];
-        arr[index] = { ...arr[index], localUri: uri, displayUri: uri };
-        return { ...prev, [position]: arr };
-      });
-    };
+  function applyReplacedPhoto(position: Position, index: number, uri: string) {
+    setPhotos(prev => {
+      const arr = [...(prev[position] ?? [])];
+      arr[index] = { ...arr[index], localUri: uri, displayUri: uri };
+      return { ...prev, [position]: arr };
+    });
+  }
 
+  function applyAddedPhoto(position: Position, uri: string) {
+    setPhotos(prev => ({
+      ...prev,
+      [position]: [...(prev[position] ?? []), {
+        id: null,
+        storagePath: null,
+        displayUri: uri,
+        localUri: uri,
+        markedForDelete: false,
+      }],
+    }));
+  }
+
+  async function replacePhoto(position: Position, index: number) {
     if (Platform.OS === 'web') {
-      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 0.75 });
-      if (!result.canceled) updateEntry(result.assets[0].uri);
+      setPickerTarget({ position, index });
       return;
     }
     Alert.alert('ფოტო', 'აირჩიეთ წყარო', [
@@ -159,14 +173,14 @@ export default function VisitDetail() {
           const perm = await ImagePicker.requestCameraPermissionsAsync();
           if (!perm.granted) return;
           const result = await ImagePicker.launchCameraAsync({ mediaTypes: 'images', quality: 0.75 });
-          if (!result.canceled) updateEntry(result.assets[0].uri);
+          if (!result.canceled) applyReplacedPhoto(position, index, result.assets[0].uri);
         },
       },
       {
         text: 'გალერეა',
         onPress: async () => {
           const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 0.75 });
-          if (!result.canceled) updateEntry(result.assets[0].uri);
+          if (!result.canceled) applyReplacedPhoto(position, index, result.assets[0].uri);
         },
       },
       { text: 'გაუქმება', style: 'cancel' },
@@ -190,22 +204,8 @@ export default function VisitDetail() {
     const activeCount = (photos[position] ?? []).filter(e => !e.markedForDelete).length;
     if (activeCount >= MAX_PHOTOS) return;
 
-    const addEntry = (uri: string) => {
-      setPhotos(prev => ({
-        ...prev,
-        [position]: [...(prev[position] ?? []), {
-          id: null,
-          storagePath: null,
-          displayUri: uri,
-          localUri: uri,
-          markedForDelete: false,
-        }],
-      }));
-    };
-
     if (Platform.OS === 'web') {
-      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 0.75 });
-      if (!result.canceled) addEntry(result.assets[0].uri);
+      setPickerTarget({ position, index: null });
       return;
     }
     Alert.alert('ფოტო', 'აირჩიეთ წყარო', [
@@ -215,18 +215,38 @@ export default function VisitDetail() {
           const perm = await ImagePicker.requestCameraPermissionsAsync();
           if (!perm.granted) return;
           const result = await ImagePicker.launchCameraAsync({ mediaTypes: 'images', quality: 0.75 });
-          if (!result.canceled) addEntry(result.assets[0].uri);
+          if (!result.canceled) applyAddedPhoto(position, result.assets[0].uri);
         },
       },
       {
         text: 'გალერეა',
         onPress: async () => {
           const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 0.75 });
-          if (!result.canceled) addEntry(result.assets[0].uri);
+          if (!result.canceled) applyAddedPhoto(position, result.assets[0].uri);
         },
       },
       { text: 'გაუქმება', style: 'cancel' },
     ]);
+  }
+
+  async function handleWebPickCamera() {
+    const target = pickerTarget;
+    setPickerTarget(null);
+    if (!target) return;
+    const result = await ImagePicker.launchCameraAsync({ mediaTypes: 'images', quality: 0.75 });
+    if (result.canceled) return;
+    if (target.index === null) applyAddedPhoto(target.position, result.assets[0].uri);
+    else applyReplacedPhoto(target.position, target.index, result.assets[0].uri);
+  }
+
+  async function handleWebPickGallery() {
+    const target = pickerTarget;
+    setPickerTarget(null);
+    if (!target) return;
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 0.75 });
+    if (result.canceled) return;
+    if (target.index === null) applyAddedPhoto(target.position, result.assets[0].uri);
+    else applyReplacedPhoto(target.position, target.index, result.assets[0].uri);
   }
 
   async function handleSave() {
@@ -336,6 +356,7 @@ export default function VisitDetail() {
   const { pct, cat } = computeScore(ratings);
 
   return (
+    <>
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       {/* Back button */}
       <TouchableOpacity
@@ -486,6 +507,13 @@ export default function VisitDetail() {
         </TouchableOpacity>
       )}
     </ScrollView>
+    <PhotoSourceModal
+      visible={pickerTarget !== null}
+      onClose={() => setPickerTarget(null)}
+      onPickCamera={handleWebPickCamera}
+      onPickGallery={handleWebPickGallery}
+    />
+    </>
   );
 }
 

@@ -18,6 +18,7 @@ interface PendingVisit {
   created_at: string;
   score_percent: number;
   category: string;
+  notes: string | null;
   shops: { shop_number: string; name: string; location: string | null } | null;
   checker: { full_name: string } | null;
 }
@@ -125,7 +126,7 @@ export default function AdminDashboard() {
     const [pendingRes, todayRes, monthRes, shopsRes, checkersRes] = await Promise.all([
       supabase
         .from('visits')
-        .select('id, date, created_at, score_percent, category, shops(shop_number, name, location), checker:checker_id(full_name)')
+        .select('id, date, created_at, score_percent, category, notes, shops(shop_number, name, location), checker:checker_id(full_name)')
         .eq('status', 'pending')
         .order('date', { ascending: false })
         .limit(50),
@@ -330,7 +331,9 @@ export default function AdminDashboard() {
                       {shop ? `#${shop.shop_number} — ${shop.name}` : '—'}
                     </Text>
                     {shop?.location ? (
-                      <Text style={styles.visitAddress} numberOfLines={1}>{shop.location}</Text>
+                      <Text style={styles.visitAddress} numberOfLines={1}>
+                        <Text style={styles.visitFieldLabel}>მისამართი: </Text>{shop.location}
+                      </Text>
                     ) : null}
                   </View>
                   <View style={[styles.scoreBadge, { backgroundColor: catColor + '18' }]}>
@@ -351,6 +354,12 @@ export default function AdminDashboard() {
                     {formatDateTime(visit.created_at)}
                   </Text>
                 </View>
+
+                {visit.notes ? (
+                  <Text style={styles.visitNote} numberOfLines={2}>
+                    <Text style={styles.visitFieldLabel}>შენიშვნა: </Text>{visit.notes}
+                  </Text>
+                ) : null}
               </View>
 
               <View style={styles.visitActions}>
@@ -549,6 +558,8 @@ const styles = StyleSheet.create({
   visitMeta: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   visitMetaText: { fontSize: 11, color: '#aaa' },
   visitMetaDot: { fontSize: 11, color: '#ddd', marginHorizontal: 2 },
+  visitNote: { fontSize: 12, color: '#999', fontStyle: 'italic', marginTop: 4 },
+  visitFieldLabel: { fontWeight: '700', color: '#888', fontStyle: 'normal' },
 
   visitActions: {
     flexDirection: 'column', justifyContent: 'center',

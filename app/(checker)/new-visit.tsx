@@ -11,6 +11,7 @@ import { useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import { ShopSelector } from '../../components/ShopSelector';
 import type { Shop } from '../../components/ShopSelector';
+import { PhotoSourceModal } from '../../components/PhotoSourceModal';
 
 async function readImageAsBase64(uri: string): Promise<string> {
   if (Platform.OS === 'web') {
@@ -43,6 +44,7 @@ export default function NewVisit() {
   const [selectedShop, setSelectedShop] = useState<Shop | null>(null);
   const [ratings, setRatings] = useState<Partial<Record<Position, Rating>>>({});
   const [photos, setPhotos] = useState<Partial<Record<Position, string[]>>>({});
+  const [pickerTarget, setPickerTarget] = useState<Position | null>(null);
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [checkerName, setCheckerName] = useState('');
@@ -77,20 +79,19 @@ export default function NewVisit() {
     });
   }, []);
 
+  function addUri(position: Position, uri: string) {
+    setPhotos(prev => ({
+      ...prev,
+      [position]: [...(prev[position] ?? []), uri],
+    }));
+  }
+
   async function pickPhoto(position: Position) {
     const current = photos[position] ?? [];
     if (current.length >= MAX_PHOTOS) return;
 
-    const addUri = (uri: string) => {
-      setPhotos(prev => ({
-        ...prev,
-        [position]: [...(prev[position] ?? []), uri],
-      }));
-    };
-
     if (Platform.OS === 'web') {
-      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 0.75 });
-      if (!result.canceled) addUri(result.assets[0].uri);
+      setPickerTarget(position);
       return;
     }
     Alert.alert('ფოტო', 'აირჩიეთ წყარო', [
@@ -100,18 +101,34 @@ export default function NewVisit() {
           const permission = await ImagePicker.requestCameraPermissionsAsync();
           if (!permission.granted) { Alert.alert('შეცდომა', 'კამერაზე წვდომა საჭიროა'); return; }
           const result = await ImagePicker.launchCameraAsync({ mediaTypes: 'images', quality: 0.75 });
-          if (!result.canceled) addUri(result.assets[0].uri);
+          if (!result.canceled) addUri(position, result.assets[0].uri);
         },
       },
       {
         text: 'გალერეა',
         onPress: async () => {
           const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 0.75 });
-          if (!result.canceled) addUri(result.assets[0].uri);
+          if (!result.canceled) addUri(position, result.assets[0].uri);
         },
       },
       { text: 'გაუქმება', style: 'cancel' },
     ]);
+  }
+
+  async function handleWebPickCamera() {
+    const position = pickerTarget;
+    setPickerTarget(null);
+    if (!position) return;
+    const result = await ImagePicker.launchCameraAsync({ mediaTypes: 'images', quality: 0.75 });
+    if (!result.canceled) addUri(position, result.assets[0].uri);
+  }
+
+  async function handleWebPickGallery() {
+    const position = pickerTarget;
+    setPickerTarget(null);
+    if (!position) return;
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 0.75 });
+    if (!result.canceled) addUri(position, result.assets[0].uri);
   }
 
   function removePhoto(position: Position, index: number) {
@@ -196,6 +213,7 @@ export default function NewVisit() {
   }
 
   return (
+    <>
     <ScrollView
       style={styles.container}
       contentContainerStyle={styles.content}
@@ -310,6 +328,13 @@ export default function NewVisit() {
         )}
       </TouchableOpacity>
     </ScrollView>
+    <PhotoSourceModal
+      visible={pickerTarget !== null}
+      onClose={() => setPickerTarget(null)}
+      onPickCamera={handleWebPickCamera}
+      onPickGallery={handleWebPickGallery}
+    />
+    </>
   );
 }
 
