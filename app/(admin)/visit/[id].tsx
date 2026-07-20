@@ -6,6 +6,7 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../../lib/supabase';
+import { getSignedUrls } from '../../../lib/signedUrlCache';
 
 const POSITIONS = ['საწყობი', 'მაცივარი', 'თარო'] as const;
 type Position = typeof POSITIONS[number];
@@ -23,6 +24,7 @@ const STATUS_LABELS: Record<string, string> = {
 
 interface VisitData {
   date: string;
+  created_at: string;
   warehouse_rating: string;
   fridge_rating: string;
   shelf_rating: string;
@@ -41,8 +43,14 @@ interface PhotoData {
 }
 
 export default function AdminVisitDetail() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, from, shopId } = useLocalSearchParams<{ id: string; from?: string; shopId?: string }>();
   const router = useRouter();
+
+  function goBack() {
+    if (from === 'shop' && shopId) router.replace(`/(admin)/shop/${shopId}` as any);
+    else if (from === 'dashboard') router.replace('/(admin)');
+    else router.replace('/(admin)/visits');
+  }
 
   const [visit, setVisit] = useState<VisitData | null>(null);
   const [photos, setPhotos] = useState<PhotoData[]>([]);
@@ -63,7 +71,7 @@ export default function AdminVisitDetail() {
     if (error || !data) {
       if (Platform.OS === 'web') window.alert('ვიზიტი ვერ მოიძებნა');
       else Alert.alert('შეცდომა', 'ვიზიტი ვერ მოიძებნა');
-      router.back();
+      goBack();
       return;
     }
 
@@ -73,11 +81,7 @@ export default function AdminVisitDetail() {
       .from('photos').select('position, storage_path').eq('visit_id', id);
 
     if (photoRows?.length) {
-      const { data: signedUrls } = await supabase.storage
-        .from('photos')
-        .createSignedUrls(photoRows.map(r => r.storage_path), 3600);
-
-      const urlMap = Object.fromEntries((signedUrls ?? []).map(s => [s.path, s.signedUrl]));
+      const urlMap = await getSignedUrls(photoRows.map(r => r.storage_path));
       setPhotos(photoRows.map(row => ({
         position: row.position as Position,
         signedUrl: urlMap[row.storage_path] ?? '',
@@ -146,7 +150,10 @@ export default function AdminVisitDetail() {
     'თარო': visit.shelf_rating,
   };
 
-  const photoMap = Object.fromEntries(photos.map(p => [p.position, p.signedUrl]));
+  const photoMap: Partial<Record<Position, string[]>> = {};
+  photos.forEach(p => {
+    (photoMap[p.position] ??= []).push(p.signedUrl);
+  });
   const statusColor = STATUS_COLORS[visit.status] ?? '#888';
 
   return (
@@ -155,7 +162,7 @@ export default function AdminVisitDetail() {
         {/* Back button */}
         <TouchableOpacity
           style={styles.backBtn}
-          onPress={() => router.canGoBack() ? router.back() : router.replace('/(admin)/visits')}
+          onPress={goBack}
           activeOpacity={0.7}
         >
           <Ionicons name="arrow-back" size={18} color="#1a1a2e" />
@@ -192,6 +199,7 @@ export default function AdminVisitDetail() {
                 {new Date(visit.date).toLocaleDateString('ka-GE', {
                   day: 'numeric', month: 'long', year: 'numeric',
                 })}
+                {visit.created_at ? `, ${new Date(visit.created_at).getHours().toString().padStart(2, '0')}:${new Date(visit.created_at).getMinutes().toString().padStart(2, '0')}` : ''}
               </Text>
             </View>
             <View style={[styles.scoreBadge, { backgroundColor: CATEGORY_COLORS[visit.category] + '20' }]}>
@@ -250,17 +258,22 @@ export default function AdminVisitDetail() {
               </View>
             </View>
 
-            {photoMap[pos] ? (
-              <TouchableOpacity
-                activeOpacity={0.9}
-                onPress={() => { setLightboxUri(photoMap[pos]); setLightboxLabel(pos); }}
+            {photoMap[pos]?.length ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.photosRow}
               >
-                <Image source={{ uri: photoMap[pos] }} style={styles.photo} resizeMode="cover" />
-                <View style={styles.zoomHint}>
-                  <Ionicons name="expand-outline" size={16} color="#fff" />
-                  <Text style={styles.zoomHintText}>გასადიდებლად დააჭირეთ</Text>
-                </View>
-              </TouchableOpacity>
+                {photoMap[pos]!.map((uri, idx) => (
+                  <TouchableOpacity
+                    key={idx}
+                    activeOpacity={0.9}
+                    onPress={() => { setLightboxUri(uri); setLightboxLabel(`${pos} ${idx + 1}/${photoMap[pos]!.length}`); }}
+                  >
+                    <Image source={{ uri }} style={styles.photo} resizeMode="cover" />
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
             ) : (
               <View style={styles.noPhoto}>
                 <Text style={styles.noPhotoText}>ფოტო არ არის</Text>
@@ -395,14 +408,8 @@ const styles = StyleSheet.create({
   ratingBadge: { borderRadius: 8, paddingHorizontal: 16, paddingVertical: 6 },
   ratingBadgeText: { fontSize: 20, fontWeight: '800' },
 
-  photo: { width: '100%', height: 220, borderRadius: 8 },
-  zoomHint: {
-    position: 'absolute', bottom: 8, right: 8,
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: 6,
-    paddingHorizontal: 8, paddingVertical: 4,
-  },
-  zoomHintText: { color: '#fff', fontSize: 11 },
+  photosRow: { gap: 8, paddingRight: 4 },
+  photo: { width: 160, height: 160, borderRadius: 8 },
   noPhoto: {
     height: 80, backgroundColor: '#f5f5f5', borderRadius: 8,
     justifyContent: 'center', alignItems: 'center',

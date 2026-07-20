@@ -31,8 +31,11 @@ interface Visit {
   category: string;
   checker_id: string;
   status: string;
-  shops: { shop_number: string; name: string } | null;
+  notes: string | null;
+  shops: { shop_number: string; name: string; location: string | null } | null;
 }
+
+const PAGE_SIZE = 150;
 
 const fmt = (d: Date) => {
   const y = d.getFullYear();
@@ -159,20 +162,38 @@ export default function VisitsList() {
     return () => clearTimeout(t);
   }, [shopQuery]);
 
-  const load = useCallback(async () => {
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  const buildQuery = useCallback(() => {
     let q = supabase
       .from('visits')
-      .select('id, date, created_at, score_percent, category, checker_id, status, shops(shop_number, name)')
-      .order('created_at', { ascending: false })
-      .limit(150);
+      .select('id, date, created_at, score_percent, category, checker_id, status, notes, shops(shop_number, name, location)')
+      .order('created_at', { ascending: false });
     q = q.gte('date', fmt(fromDate));
     q = q.lte('date', fmt(toDate));
     if (statusFilter !== 'all') q = q.eq('status', statusFilter);
     if (selectedChecker) q = q.eq('checker_id', selectedChecker);
     if (selectedShop) q = q.eq('shop_id', selectedShop.id);
-    const { data } = await q;
-    setVisits((data as unknown as Visit[]) ?? []);
+    return q;
   }, [fromDate, toDate, statusFilter, selectedChecker, selectedShop]);
+
+  const load = useCallback(async () => {
+    const { data } = await buildQuery().range(0, PAGE_SIZE - 1);
+    const rows = (data as unknown as Visit[]) ?? [];
+    setVisits(rows);
+    setHasMore(rows.length === PAGE_SIZE);
+  }, [buildQuery]);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    const { data } = await buildQuery().range(visits.length, visits.length + PAGE_SIZE - 1);
+    const rows = (data as unknown as Visit[]) ?? [];
+    setVisits(prev => [...prev, ...rows]);
+    setHasMore(rows.length === PAGE_SIZE);
+    setLoadingMore(false);
+  }, [buildQuery, visits.length, loadingMore, hasMore]);
 
   useEffect(() => {
     load().finally(() => setLoading(false));
@@ -193,7 +214,7 @@ export default function VisitsList() {
   async function handleExport() {
     let q = supabase
       .from('visits')
-      .select('date, score_percent, category, warehouse_rating, fridge_rating, shelf_rating, notes, shops(shop_number, name), checker:checker_id(full_name)')
+      .select('date, created_at, score_percent, category, warehouse_rating, fridge_rating, shelf_rating, notes, shops(shop_number, name), checker:checker_id(full_name)')
       .order('date', { ascending: false });
     q = q.gte('date', fmt(fromDate));
     q = q.lte('date', fmt(toDate));
@@ -208,9 +229,10 @@ export default function VisitsList() {
       return;
     }
 
-    const headers = ['თარიღი', 'მაღაზია #', 'მაღაზია სახელი', 'ჩეკერი', 'საერთო ქულა %', 'კატეგორია', 'საწყობის ქულა', 'მაცივრის ქულა', 'თაროს ქულა', 'შენიშვნები'];
+    const headers = ['თარიღი', 'საათი', 'მაღაზია #', 'მაღაზია სახელი', 'ჩეკერი', 'საერთო ქულა %', 'კატეგორია', 'საწყობის ქულა', 'მაცივრის ქულა', 'თაროს ქულა', 'შენიშვნები'];
     const rows = (data as any[]).map(v => [
       v.date,
+      v.created_at ? `${new Date(v.created_at).getHours().toString().padStart(2, '0')}:${new Date(v.created_at).getMinutes().toString().padStart(2, '0')}` : '',
       v.shops?.shop_number ?? '',
       v.shops?.name ?? '',
       (v.checker as any)?.full_name ?? '',
@@ -509,15 +531,22 @@ export default function VisitsList() {
           keyExtractor={v => v.id}
           contentContainerStyle={styles.listContent}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.4}
           ListHeaderComponent={
             <Text style={[styles.resultCount, { paddingHorizontal: 16, paddingTop: 8 }]}>
-              {visits.length} ვიზიტი
+              {visits.length}{hasMore ? '+' : ''} ვიზიტი
             </Text>
           }
           ListEmptyComponent={
             <View style={styles.emptyBox}>
               <Text style={styles.emptyText}>ვიზიტი არ მოიძებნა</Text>
             </View>
+          }
+          ListFooterComponent={
+            loadingMore ? (
+              <ActivityIndicator size="small" color="#2563eb" style={{ marginVertical: 16 }} />
+            ) : null
           }
           renderItem={({ item: visit }) => (
             <TouchableOpacity
@@ -530,9 +559,19 @@ export default function VisitsList() {
                   <Text style={styles.visitShopNum}>#{visit.shops?.shop_number}</Text>
                   {' — '}{visit.shops?.name}
                 </Text>
+                {visit.shops?.location ? (
+                  <Text style={styles.visitAddress} numberOfLines={1}>
+                    <Text style={styles.visitFieldLabel}>მისამართი: </Text>{visit.shops.location}
+                  </Text>
+                ) : null}
                 <Text style={styles.visitMeta}>
                   {checkerMap[visit.checker_id] ?? '—'}  ·  {formatDate(visit.created_at)}
                 </Text>
+                {visit.notes ? (
+                  <Text style={styles.visitNote} numberOfLines={2}>
+                    <Text style={styles.visitFieldLabel}>შენიშვნა: </Text>{visit.notes}
+                  </Text>
+                ) : null}
               </View>
               <View style={styles.visitRight}>
                 <Text style={[styles.visitScore, { color: CATEGORY_COLORS[visit.category] }]}>
@@ -738,7 +777,10 @@ const styles = StyleSheet.create({
   visitMain: { flex: 1 },
   visitShop: { fontSize: 14, fontWeight: '700', color: '#1a1a2e', marginBottom: 3 },
   visitShopNum: { color: '#2563eb', fontWeight: '800' },
+  visitAddress: { fontSize: 12, color: '#999', marginTop: 1 },
   visitMeta: { fontSize: 12, color: '#aaa' },
+  visitNote: { fontSize: 12, color: '#999', fontStyle: 'italic', marginTop: 4 },
+  visitFieldLabel: { fontWeight: '700', color: '#888', fontStyle: 'normal' },
   visitRight: { alignItems: 'flex-end', gap: 4, marginHorizontal: 10 },
   visitScore: { fontSize: 16, fontWeight: '800' },
   badge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },

@@ -9,8 +9,10 @@ import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { decode } from 'base64-arraybuffer';
 import { supabase } from '../../../lib/supabase';
+import { getSignedUrls } from '../../../lib/signedUrlCache';
 import { ShopSelector } from '../../../components/ShopSelector';
 import type { Shop } from '../../../components/ShopSelector';
+import { PhotoSourceModal } from '../../../components/PhotoSourceModal';
 
 async function readImageAsBase64(uri: string): Promise<string> {
   if (Platform.OS === 'web') {
@@ -40,6 +42,8 @@ const CATEGORY_COLORS: Record<string, string> = {
   A: '#16a34a', B: '#2563eb', C: '#d97706', D: '#dc2626',
 };
 
+const MAX_PHOTOS = 5;
+
 function computeScore(r: Partial<Record<Position, Rating>>) {
   const aCount = POSITIONS.filter(p => r[p] === 'A').length;
   return {
@@ -48,11 +52,12 @@ function computeScore(r: Partial<Record<Position, Rating>>) {
   };
 }
 
-interface PhotoState {
-  id: string;
-  storagePath: string;
+interface PhotoEntry {
+  id: string | null;
+  storagePath: string | null;
   displayUri: string | null;
   localUri: string | null;
+  markedForDelete: boolean;
 }
 
 export default function VisitDetail() {
@@ -61,8 +66,10 @@ export default function VisitDetail() {
 
   const [selectedShop, setSelectedShop] = useState<Shop | null>(null);
   const [date, setDate] = useState('');
+  const [createdAt, setCreatedAt] = useState('');
   const [ratings, setRatings] = useState<Partial<Record<Position, Rating>>>({});
-  const [photos, setPhotos] = useState<Partial<Record<Position, PhotoState>>>({});
+  const [photos, setPhotos] = useState<Partial<Record<Position, PhotoEntry[]>>>({});
+  const [pickerTarget, setPickerTarget] = useState<{ position: Position; index: number | null } | null>(null);
   const [notes, setNotes] = useState('');
   const [checkerName, setCheckerName] = useState('');
   const [status, setStatus] = useState('pending');
@@ -97,6 +104,7 @@ export default function VisitDetail() {
     const shop = visit.shops as any;
     setSelectedShop(shop ?? null);
     setDate(visit.date);
+    setCreatedAt(visit.created_at);
     setNotes(visit.notes ?? '');
     setStatus(visit.status ?? 'pending');
     setRejectionNote(visit.rejection_note ?? null);
@@ -110,22 +118,19 @@ export default function VisitDetail() {
       .from('photos').select('id, position, storage_path').eq('visit_id', id);
 
     if (photoRows && photoRows.length > 0) {
-      const { data: signedUrls } = await supabase.storage
-        .from('photos')
-        .createSignedUrls(photoRows.map(r => r.storage_path), 3600);
+      const urlMap = await getSignedUrls(photoRows.map(r => r.storage_path));
 
-      const urlMap = Object.fromEntries(
-        (signedUrls ?? []).map(s => [s.path, s.signedUrl])
-      );
-
-      const state: Partial<Record<Position, PhotoState>> = {};
+      const state: Partial<Record<Position, PhotoEntry[]>> = {};
       photoRows.forEach(row => {
-        state[row.position as Position] = {
+        const pos = row.position as Position;
+        if (!state[pos]) state[pos] = [];
+        state[pos]!.push({
           id: row.id,
           storagePath: row.storage_path,
           displayUri: urlMap[row.storage_path] ?? null,
           localUri: null,
-        };
+          markedForDelete: false,
+        });
       });
       setPhotos(state);
     }
@@ -135,13 +140,30 @@ export default function VisitDetail() {
     load().finally(() => setLoading(false));
   }, [load]);
 
-  async function replacePhoto(position: Position) {
+  function applyReplacedPhoto(position: Position, index: number, uri: string) {
+    setPhotos(prev => {
+      const arr = [...(prev[position] ?? [])];
+      arr[index] = { ...arr[index], localUri: uri, displayUri: uri };
+      return { ...prev, [position]: arr };
+    });
+  }
+
+  function applyAddedPhoto(position: Position, uri: string) {
+    setPhotos(prev => ({
+      ...prev,
+      [position]: [...(prev[position] ?? []), {
+        id: null,
+        storagePath: null,
+        displayUri: uri,
+        localUri: uri,
+        markedForDelete: false,
+      }],
+    }));
+  }
+
+  async function replacePhoto(position: Position, index: number) {
     if (Platform.OS === 'web') {
-      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 0.75 });
-      if (!result.canceled) {
-        const uri = result.assets[0].uri;
-        setPhotos(prev => ({ ...prev, [position]: { ...prev[position]!, localUri: uri, displayUri: uri } }));
-      }
+      setPickerTarget({ position, index });
       return;
     }
     Alert.alert('ფოტო', 'აირჩიეთ წყარო', [
@@ -151,24 +173,80 @@ export default function VisitDetail() {
           const perm = await ImagePicker.requestCameraPermissionsAsync();
           if (!perm.granted) return;
           const result = await ImagePicker.launchCameraAsync({ mediaTypes: 'images', quality: 0.75 });
-          if (!result.canceled) {
-            const uri = result.assets[0].uri;
-            setPhotos(prev => ({ ...prev, [position]: { ...prev[position]!, localUri: uri, displayUri: uri } }));
-          }
+          if (!result.canceled) applyReplacedPhoto(position, index, result.assets[0].uri);
         },
       },
       {
         text: 'გალერეა',
         onPress: async () => {
           const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 0.75 });
-          if (!result.canceled) {
-            const uri = result.assets[0].uri;
-            setPhotos(prev => ({ ...prev, [position]: { ...prev[position]!, localUri: uri, displayUri: uri } }));
-          }
+          if (!result.canceled) applyReplacedPhoto(position, index, result.assets[0].uri);
         },
       },
       { text: 'გაუქმება', style: 'cancel' },
     ]);
+  }
+
+  function removePhotoEntry(position: Position, index: number) {
+    setPhotos(prev => {
+      const arr = [...(prev[position] ?? [])];
+      const entry = arr[index];
+      if (entry.id === null) {
+        arr.splice(index, 1);
+      } else {
+        arr[index] = { ...entry, markedForDelete: true };
+      }
+      return { ...prev, [position]: arr };
+    });
+  }
+
+  async function addPhoto(position: Position) {
+    const activeCount = (photos[position] ?? []).filter(e => !e.markedForDelete).length;
+    if (activeCount >= MAX_PHOTOS) return;
+
+    if (Platform.OS === 'web') {
+      setPickerTarget({ position, index: null });
+      return;
+    }
+    Alert.alert('ფოტო', 'აირჩიეთ წყარო', [
+      {
+        text: 'კამერა',
+        onPress: async () => {
+          const perm = await ImagePicker.requestCameraPermissionsAsync();
+          if (!perm.granted) return;
+          const result = await ImagePicker.launchCameraAsync({ mediaTypes: 'images', quality: 0.75 });
+          if (!result.canceled) applyAddedPhoto(position, result.assets[0].uri);
+        },
+      },
+      {
+        text: 'გალერეა',
+        onPress: async () => {
+          const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 0.75 });
+          if (!result.canceled) applyAddedPhoto(position, result.assets[0].uri);
+        },
+      },
+      { text: 'გაუქმება', style: 'cancel' },
+    ]);
+  }
+
+  async function handleWebPickCamera() {
+    const target = pickerTarget;
+    setPickerTarget(null);
+    if (!target) return;
+    const result = await ImagePicker.launchCameraAsync({ mediaTypes: 'images', quality: 0.75 });
+    if (result.canceled) return;
+    if (target.index === null) applyAddedPhoto(target.position, result.assets[0].uri);
+    else applyReplacedPhoto(target.position, target.index, result.assets[0].uri);
+  }
+
+  async function handleWebPickGallery() {
+    const target = pickerTarget;
+    setPickerTarget(null);
+    if (!target) return;
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 0.75 });
+    if (result.canceled) return;
+    if (target.index === null) applyAddedPhoto(target.position, result.assets[0].uri);
+    else applyReplacedPhoto(target.position, target.index, result.assets[0].uri);
   }
 
   async function handleSave() {
@@ -179,6 +257,8 @@ export default function VisitDetail() {
     if (!selectedShop) { err('აირჩიეთ მაღაზია'); return; }
     for (const pos of POSITIONS) {
       if (!ratings[pos]) { err(`მონიშნეთ რეიტინგი: ${pos}`); return; }
+      const active = (photos[pos] ?? []).filter(e => !e.markedForDelete);
+      if (active.length === 0) { err(`${pos}: ერთი ფოტო მინიმუმ საჭიროა`); return; }
     }
 
     setSaving(true);
@@ -204,26 +284,51 @@ export default function VisitDetail() {
 
       const timestamp = Date.now();
       const safeName = checkerName.replace(/[^a-zA-Z0-9_-]/g, '_') || 'checker';
+      let newPhotoIdx = 0;
 
       for (const pos of POSITIONS) {
-        const photo = photos[pos];
-        if (!photo?.localUri) continue;
+        const entries = photos[pos] ?? [];
 
-        const newPath = `${safeName}/${selectedShop.shop_number}/${POSITION_PATH[pos]}_${timestamp}.jpg`;
-        const base64 = await readImageAsBase64(photo.localUri);
+        for (let i = 0; i < entries.length; i++) {
+          const entry = entries[i];
 
-        const { error: uploadError } = await supabase.storage
-          .from('photos').upload(newPath, decode(base64), { contentType: 'image/jpeg' });
+          if (entry.markedForDelete && entry.id) {
+            await supabase.from('photos').delete().eq('id', entry.id);
+            if (entry.storagePath) {
+              await supabase.storage.from('photos').remove([entry.storagePath]);
+            }
+            continue;
+          }
 
-        if (uploadError) throw uploadError;
+          if (entry.id && entry.localUri) {
+            // Replace existing photo
+            const newPath = `${safeName}/${selectedShop.shop_number}/${POSITION_PATH[pos]}_${timestamp}_${entry.id}.jpg`;
+            const base64 = await readImageAsBase64(entry.localUri);
+            const { error: uploadError } = await supabase.storage
+              .from('photos').upload(newPath, decode(base64), { contentType: 'image/jpeg' });
+            if (uploadError) throw uploadError;
+            const { error: photoError } = await supabase
+              .from('photos').update({ storage_path: newPath }).eq('id', entry.id);
+            if (photoError) throw photoError;
+            if (entry.storagePath) {
+              await supabase.storage.from('photos').remove([entry.storagePath]);
+            }
+            continue;
+          }
 
-        // Update DB before deleting old file — if DB fails, old file is still intact
-        const { error: photoError } = await supabase
-          .from('photos').update({ storage_path: newPath }).eq('id', photo.id);
-
-        if (photoError) throw photoError;
-
-        await supabase.storage.from('photos').remove([photo.storagePath]);
+          if (entry.id === null && entry.localUri) {
+            // Add new photo
+            const newPath = `${safeName}/${selectedShop.shop_number}/${POSITION_PATH[pos]}_new_${timestamp}_${newPhotoIdx}.jpg`;
+            newPhotoIdx++;
+            const base64 = await readImageAsBase64(entry.localUri);
+            const { error: uploadError } = await supabase.storage
+              .from('photos').upload(newPath, decode(base64), { contentType: 'image/jpeg' });
+            if (uploadError) throw uploadError;
+            const { error: insertError } = await supabase
+              .from('photos').insert({ visit_id: id, position: pos, storage_path: newPath });
+            if (insertError) throw insertError;
+          }
+        }
       }
 
       if (Platform.OS === 'web') {
@@ -251,6 +356,7 @@ export default function VisitDetail() {
   const { pct, cat } = computeScore(ratings);
 
   return (
+    <>
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       {/* Back button */}
       <TouchableOpacity
@@ -262,7 +368,7 @@ export default function VisitDetail() {
         <Text style={styles.backBtnText}>უკან</Text>
       </TouchableOpacity>
 
-      {/* Rejection banner */}
+      {/* Status banners */}
       {status === 'rejected' && (
         <View style={styles.rejectionBanner}>
           <Ionicons name="alert-circle" size={18} color="#dc2626" />
@@ -294,6 +400,7 @@ export default function VisitDetail() {
           {new Date(date).toLocaleDateString('ka-GE', {
             day: 'numeric', month: 'long', year: 'numeric',
           })}
+          {createdAt ? `, ${new Date(createdAt).getHours().toString().padStart(2, '0')}:${new Date(createdAt).getMinutes().toString().padStart(2, '0')}` : ''}
         </Text>
         <View style={[styles.badge, { backgroundColor: CATEGORY_COLORS[cat] + '20' }]}>
           <Text style={[styles.badgeText, { color: CATEGORY_COLORS[cat] }]}>
@@ -303,45 +410,74 @@ export default function VisitDetail() {
       </View>
 
       <Text style={styles.sectionTitle}>შეფასება და ფოტოები</Text>
-      {POSITIONS.map(pos => (
-        <View key={pos} style={styles.positionCard}>
-          <Text style={styles.positionLabel}>{pos}</Text>
+      {POSITIONS.map(pos => {
+        const posEntries = photos[pos] ?? [];
+        const activeCount = posEntries.filter(e => !e.markedForDelete).length;
+        return (
+          <View key={pos} style={styles.positionCard}>
+            <View style={styles.positionLabelRow}>
+              <Text style={styles.positionLabel}>{pos}</Text>
+              <Text style={styles.photoCount}>ფოტო {activeCount}/{MAX_PHOTOS}</Text>
+            </View>
 
-          <View style={styles.ratingRow}>
-            {(['A', 'B'] as Rating[]).map(r => (
-              <TouchableOpacity
-                key={r}
-                style={[styles.ratingBtn, ratings[pos] === r && styles.ratingBtnActive]}
-                onPress={() => !readOnly && setRatings(prev => ({ ...prev, [pos]: r }))}
-                activeOpacity={readOnly ? 1 : 0.7}
-              >
-                <Text style={[styles.ratingBtnText, ratings[pos] === r && styles.ratingBtnTextActive]}>
-                  {r}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+            <View style={styles.ratingRow}>
+              {(['A', 'B'] as Rating[]).map(r => (
+                <TouchableOpacity
+                  key={r}
+                  style={[styles.ratingBtn, ratings[pos] === r && styles.ratingBtnActive]}
+                  onPress={() => !readOnly && setRatings(prev => ({ ...prev, [pos]: r }))}
+                  activeOpacity={readOnly ? 1 : 0.7}
+                >
+                  <Text style={[styles.ratingBtnText, ratings[pos] === r && styles.ratingBtnTextActive]}>
+                    {r}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
 
-          <TouchableOpacity
-            style={styles.photoBox}
-            onPress={() => !readOnly && replacePhoto(pos)}
-            activeOpacity={readOnly ? 1 : 0.7}
-          >
-            {photos[pos]?.displayUri ? (
-              <>
-                <Image source={{ uri: photos[pos]!.displayUri! }} style={styles.photoPreview} />
-                {photos[pos]?.localUri && (
-                  <View style={styles.changedBadge}>
-                    <Text style={styles.changedBadgeText}>შეცვლილი</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.photosRow}
+              keyboardShouldPersistTaps="always"
+            >
+              {posEntries.map((entry, rawIdx) => {
+                if (entry.markedForDelete) return null;
+                return (
+                  <View key={rawIdx} style={styles.thumbWrapper}>
+                    <TouchableOpacity
+                      onPress={() => !readOnly && replacePhoto(pos, rawIdx)}
+                      activeOpacity={readOnly ? 1 : 0.75}
+                    >
+                      <Image source={{ uri: entry.displayUri! }} style={styles.thumb} />
+                      {entry.localUri && !readOnly && (
+                        <View style={styles.changedBadge}>
+                          <Text style={styles.changedBadgeText}>შეცვლილი</Text>
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                    {!readOnly && (
+                      <TouchableOpacity
+                        style={styles.removePhotoBtn}
+                        onPress={() => removePhotoEntry(pos, rawIdx)}
+                        hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                      >
+                        <Ionicons name="close-circle" size={20} color="#dc2626" />
+                      </TouchableOpacity>
+                    )}
                   </View>
-                )}
-              </>
-            ) : (
-              <Text style={styles.photoBoxText}>📷  ფოტოს გადაღება</Text>
-            )}
-          </TouchableOpacity>
-        </View>
-      ))}
+                );
+              })}
+              {!readOnly && activeCount < MAX_PHOTOS && (
+                <TouchableOpacity style={styles.addPhotoBtn} onPress={() => addPhoto(pos)}>
+                  <Ionicons name="camera-outline" size={24} color="#888" />
+                  <Text style={styles.addPhotoText}>ფოტო</Text>
+                </TouchableOpacity>
+              )}
+            </ScrollView>
+          </View>
+        );
+      })}
 
       <Text style={[styles.sectionTitle, { marginTop: 24 }]}>შენიშვნა</Text>
       <TextInput
@@ -371,6 +507,13 @@ export default function VisitDetail() {
         </TouchableOpacity>
       )}
     </ScrollView>
+    <PhotoSourceModal
+      visible={pickerTarget !== null}
+      onClose={() => setPickerTarget(null)}
+      onPickCamera={handleWebPickCamera}
+      onPickGallery={handleWebPickGallery}
+    />
+    </>
   );
 }
 
@@ -417,9 +560,13 @@ const styles = StyleSheet.create({
   date: { color: '#888', fontSize: 13 },
 
   positionCard: { backgroundColor: '#fff', borderRadius: 12, padding: 14, marginBottom: 10 },
-  positionLabel: { fontSize: 15, fontWeight: '700', color: '#1a1a2e', marginBottom: 12 },
+  positionLabelRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12,
+  },
+  positionLabel: { fontSize: 15, fontWeight: '700', color: '#1a1a2e' },
+  photoCount: { fontSize: 12, color: '#aaa', fontWeight: '600' },
 
-  ratingRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
+  ratingRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
   ratingBtn: {
     flex: 1, paddingVertical: 12, borderRadius: 8,
     borderWidth: 2, borderColor: '#e0e0e0', alignItems: 'center',
@@ -428,18 +575,26 @@ const styles = StyleSheet.create({
   ratingBtnText: { fontSize: 20, fontWeight: '800', color: '#ccc' },
   ratingBtnTextActive: { color: '#2563eb' },
 
-  photoBox: {
-    backgroundColor: '#f8f9fa', borderRadius: 8, borderWidth: 1,
-    borderColor: '#e0e0e0', borderStyle: 'dashed',
-    height: 160, justifyContent: 'center', alignItems: 'center', overflow: 'hidden',
+  photosRow: { gap: 8, paddingRight: 4 },
+  thumbWrapper: { width: 80, height: 80, borderRadius: 8, overflow: 'visible', position: 'relative' },
+  thumb: { width: 80, height: 80, borderRadius: 8 },
+  removePhotoBtn: {
+    position: 'absolute', top: -6, right: -6,
+    backgroundColor: '#fff', borderRadius: 10,
   },
-  photoPreview: { width: '100%', height: '100%' },
-  photoBoxText: { color: '#999', fontSize: 14 },
   changedBadge: {
-    position: 'absolute', top: 8, right: 8,
-    backgroundColor: '#2563eb', borderRadius: 4, paddingHorizontal: 8, paddingVertical: 2,
+    position: 'absolute', bottom: 4, left: 4, right: 4,
+    backgroundColor: '#2563eb', borderRadius: 3,
+    paddingVertical: 1, alignItems: 'center',
   },
-  changedBadgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  changedBadgeText: { color: '#fff', fontSize: 9, fontWeight: '700' },
+  addPhotoBtn: {
+    width: 80, height: 80, borderRadius: 8,
+    backgroundColor: '#f8f9fa', borderWidth: 1.5,
+    borderColor: '#e0e0e0', borderStyle: 'dashed',
+    justifyContent: 'center', alignItems: 'center', gap: 4,
+  },
+  addPhotoText: { fontSize: 11, color: '#aaa', fontWeight: '600' },
 
   input: {
     backgroundColor: '#fff', borderWidth: 1, borderColor: '#e0e0e0',

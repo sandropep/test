@@ -11,6 +11,7 @@ import { useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import { ShopSelector } from '../../components/ShopSelector';
 import type { Shop } from '../../components/ShopSelector';
+import { PhotoSourceModal } from '../../components/PhotoSourceModal';
 
 async function readImageAsBase64(uri: string): Promise<string> {
   if (Platform.OS === 'web') {
@@ -30,18 +31,20 @@ const POSITIONS = ['საწყობი', 'მაცივარი', 'თა�
 type Position = typeof POSITIONS[number];
 type Rating = 'A' | 'B';
 
-// ASCII-safe names for storage paths
 const POSITION_PATH: Record<Position, string> = {
   'საწყობი': 'warehouse',
   'მაცივარი': 'fridge',
   'თარო': 'shelf',
 };
 
+const MAX_PHOTOS = 5;
+
 export default function NewVisit() {
   const router = useRouter();
   const [selectedShop, setSelectedShop] = useState<Shop | null>(null);
   const [ratings, setRatings] = useState<Partial<Record<Position, Rating>>>({});
-  const [photos, setPhotos] = useState<Partial<Record<Position, string>>>({});
+  const [photos, setPhotos] = useState<Partial<Record<Position, string[]>>>({});
+  const [pickerTarget, setPickerTarget] = useState<Position | null>(null);
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [checkerName, setCheckerName] = useState('');
@@ -71,18 +74,24 @@ export default function NewVisit() {
       if (!user) return;
       setUserId(user.id);
       supabase
-        .from('users')
-        .select('full_name')
-        .eq('id', user.id)
-        .single()
+        .from('users').select('full_name').eq('id', user.id).single()
         .then(({ data }) => setCheckerName(data?.full_name || user.email || 'unknown'));
     });
   }, []);
 
+  function addUri(position: Position, uri: string) {
+    setPhotos(prev => ({
+      ...prev,
+      [position]: [...(prev[position] ?? []), uri],
+    }));
+  }
+
   async function pickPhoto(position: Position) {
+    const current = photos[position] ?? [];
+    if (current.length >= MAX_PHOTOS) return;
+
     if (Platform.OS === 'web') {
-      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 0.75 });
-      if (!result.canceled) setPhotos(prev => ({ ...prev, [position]: result.assets[0].uri }));
+      setPickerTarget(position);
       return;
     }
     Alert.alert('ფოტო', 'აირჩიეთ წყარო', [
@@ -92,18 +101,41 @@ export default function NewVisit() {
           const permission = await ImagePicker.requestCameraPermissionsAsync();
           if (!permission.granted) { Alert.alert('შეცდომა', 'კამერაზე წვდომა საჭიროა'); return; }
           const result = await ImagePicker.launchCameraAsync({ mediaTypes: 'images', quality: 0.75 });
-          if (!result.canceled) setPhotos(prev => ({ ...prev, [position]: result.assets[0].uri }));
+          if (!result.canceled) addUri(position, result.assets[0].uri);
         },
       },
       {
         text: 'გალერეა',
         onPress: async () => {
           const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 0.75 });
-          if (!result.canceled) setPhotos(prev => ({ ...prev, [position]: result.assets[0].uri }));
+          if (!result.canceled) addUri(position, result.assets[0].uri);
         },
       },
       { text: 'გაუქმება', style: 'cancel' },
     ]);
+  }
+
+  async function handleWebPickCamera() {
+    const position = pickerTarget;
+    setPickerTarget(null);
+    if (!position) return;
+    const result = await ImagePicker.launchCameraAsync({ mediaTypes: 'images', quality: 0.75 });
+    if (!result.canceled) addUri(position, result.assets[0].uri);
+  }
+
+  async function handleWebPickGallery() {
+    const position = pickerTarget;
+    setPickerTarget(null);
+    if (!position) return;
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 0.75 });
+    if (!result.canceled) addUri(position, result.assets[0].uri);
+  }
+
+  function removePhoto(position: Position, index: number) {
+    setPhotos(prev => ({
+      ...prev,
+      [position]: (prev[position] ?? []).filter((_, i) => i !== index),
+    }));
   }
 
   async function handleSubmit() {
@@ -114,25 +146,28 @@ export default function NewVisit() {
     if (!selectedShop) { err('აირჩიეთ მაღაზია'); return; }
     for (const pos of POSITIONS) {
       if (!ratings[pos]) { err(`მონიშნეთ რეიტინგი: ${pos}`); return; }
-      if (!photos[pos]) { err(`გადაიღეთ ფოტო: ${pos}`); return; }
+      if (!(photos[pos]?.length)) { err(`გადაიღეთ ფოტო: ${pos}`); return; }
     }
 
     setSubmitting(true);
-    const uploadedPaths: string[] = [];
+    const uploadedPaths: Array<{ pos: Position; path: string }> = [];
     try {
       if (!userId) throw new Error('Not authenticated');
 
-      // Step 1: upload all photos before touching the DB
       const timestamp = Date.now();
       const safeName = checkerName.replace(/[^a-zA-Z0-9_-]/g, '_') || 'checker';
+
+      // Step 1: upload all photos before touching the DB
       for (const pos of POSITIONS) {
-        const uri = photos[pos]!;
-        const storagePath = `${safeName}/${selectedShop.shop_number}/${POSITION_PATH[pos]}_${timestamp}.jpg`;
-        const base64 = await readImageAsBase64(uri);
-        const { error: uploadError } = await supabase.storage
-          .from('photos').upload(storagePath, decode(base64), { contentType: 'image/jpeg' });
-        if (uploadError) throw uploadError;
-        uploadedPaths.push(storagePath);
+        const uris = photos[pos] ?? [];
+        for (let idx = 0; idx < uris.length; idx++) {
+          const storagePath = `${safeName}/${selectedShop.shop_number}/${POSITION_PATH[pos]}_${idx}_${timestamp}.jpg`;
+          const base64 = await readImageAsBase64(uris[idx]);
+          const { error: uploadError } = await supabase.storage
+            .from('photos').upload(storagePath, decode(base64), { contentType: 'image/jpeg' });
+          if (uploadError) throw uploadError;
+          uploadedPaths.push({ pos, path: storagePath });
+        }
       }
 
       // Step 2: insert visit
@@ -152,7 +187,11 @@ export default function NewVisit() {
 
       // Step 3: record all photos in one batch
       const { error: photosError } = await supabase.from('photos').insert(
-        POSITIONS.map((pos, i) => ({ visit_id: visit.id, position: pos, storage_path: uploadedPaths[i] }))
+        uploadedPaths.map(({ pos, path }) => ({
+          visit_id: visit.id,
+          position: pos,
+          storage_path: path,
+        }))
       );
       if (photosError) {
         await supabase.from('visits').delete().eq('id', visit.id);
@@ -163,9 +202,8 @@ export default function NewVisit() {
       if (Platform.OS === 'web') window.alert('ვიზიტი შენახულია!');
       else Alert.alert('წარმატება', 'ვიზიტი შენახულია!');
     } catch (err: any) {
-      // Clean up any files already uploaded if the operation failed
       if (uploadedPaths.length) {
-        await supabase.storage.from('photos').remove(uploadedPaths);
+        await supabase.storage.from('photos').remove(uploadedPaths.map(p => p.path));
       }
       if (Platform.OS === 'web') window.alert(err.message ?? 'სცადეთ თავიდან');
       else Alert.alert('შეცდომა', err.message ?? 'სცადეთ თავიდან');
@@ -175,6 +213,7 @@ export default function NewVisit() {
   }
 
   return (
+    <>
     <ScrollView
       style={styles.container}
       contentContainerStyle={styles.content}
@@ -208,33 +247,57 @@ export default function NewVisit() {
 
       {/* Ratings + Photos per position */}
       <Text style={[styles.sectionTitle, { marginTop: 24 }]}>შეფასება და ფოტოები</Text>
-      {POSITIONS.map(pos => (
-        <View key={pos} style={styles.positionCard}>
-          <Text style={styles.positionLabel}>{pos}</Text>
+      {POSITIONS.map(pos => {
+        const posPhotos = photos[pos] ?? [];
+        return (
+          <View key={pos} style={styles.positionCard}>
+            <View style={styles.positionLabelRow}>
+              <Text style={styles.positionLabel}>{pos}</Text>
+              <Text style={styles.photoCount}>ფოტო {posPhotos.length}/{MAX_PHOTOS}</Text>
+            </View>
 
-          <View style={styles.ratingRow}>
-            {(['A', 'B'] as Rating[]).map(r => (
-              <TouchableOpacity
-                key={r}
-                style={[styles.ratingBtn, ratings[pos] === r && styles.ratingBtnActive]}
-                onPress={() => setRatings(prev => ({ ...prev, [pos]: r }))}
-              >
-                <Text style={[styles.ratingBtnText, ratings[pos] === r && styles.ratingBtnTextActive]}>
-                  {r}
-                </Text>
-              </TouchableOpacity>
-            ))}
+            <View style={styles.ratingRow}>
+              {(['A', 'B'] as Rating[]).map(r => (
+                <TouchableOpacity
+                  key={r}
+                  style={[styles.ratingBtn, ratings[pos] === r && styles.ratingBtnActive]}
+                  onPress={() => setRatings(prev => ({ ...prev, [pos]: r }))}
+                >
+                  <Text style={[styles.ratingBtnText, ratings[pos] === r && styles.ratingBtnTextActive]}>
+                    {r}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.photosRow}
+              keyboardShouldPersistTaps="always"
+            >
+              {posPhotos.map((uri, idx) => (
+                <View key={idx} style={styles.thumbWrapper}>
+                  <Image source={{ uri }} style={styles.thumb} />
+                  <TouchableOpacity
+                    style={styles.removePhotoBtn}
+                    onPress={() => removePhoto(pos, idx)}
+                    hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                  >
+                    <Ionicons name="close-circle" size={20} color="#dc2626" />
+                  </TouchableOpacity>
+                </View>
+              ))}
+              {posPhotos.length < MAX_PHOTOS && (
+                <TouchableOpacity style={styles.addPhotoBtn} onPress={() => pickPhoto(pos)}>
+                  <Ionicons name="camera-outline" size={24} color="#888" />
+                  <Text style={styles.addPhotoText}>ფოტო</Text>
+                </TouchableOpacity>
+              )}
+            </ScrollView>
           </View>
-
-          <TouchableOpacity style={styles.photoBox} onPress={() => pickPhoto(pos)}>
-            {photos[pos] ? (
-              <Image source={{ uri: photos[pos] }} style={styles.photoPreview} />
-            ) : (
-              <Text style={styles.photoBoxText}>📷  ფოტოს გადაღება</Text>
-            )}
-          </TouchableOpacity>
-        </View>
-      ))}
+        );
+      })}
 
       {/* Notes */}
       <Text style={[styles.sectionTitle, { marginTop: 24 }]}>
@@ -265,11 +328,19 @@ export default function NewVisit() {
         )}
       </TouchableOpacity>
     </ScrollView>
+    <PhotoSourceModal
+      visible={pickerTarget !== null}
+      onClose={() => setPickerTarget(null)}
+      onPickCamera={handleWebPickCamera}
+      onPickGallery={handleWebPickGallery}
+    />
+    </>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f0f2f5' },
+  content: { padding: 16, paddingBottom: 48 },
 
   backBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
@@ -279,119 +350,66 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: '#e0e0e0',
   },
   backBtnText: { fontSize: 14, fontWeight: '600', color: '#1a1a2e' },
-  content: { padding: 16, paddingBottom: 48 },
 
   titleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
+    flexDirection: 'row', justifyContent: 'space-between',
+    alignItems: 'center', marginBottom: 20,
   },
-  screenTitle: { fontSize: 22, fontWeight: '800', color: '#1a1a2e' },
   resetBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderWidth: 1.5,
-    borderColor: '#dc2626',
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    backgroundColor: '#fff5f5',
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    borderWidth: 1.5, borderColor: '#dc2626', borderRadius: 20,
+    paddingHorizontal: 14, paddingVertical: 8, backgroundColor: '#fff5f5',
   },
   resetBtnText: { color: '#dc2626', fontWeight: '600', fontSize: 14 },
 
   sectionTitle: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#888',
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    marginBottom: 8,
+    fontSize: 11, fontWeight: '700', color: '#888',
+    textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8,
   },
 
   input: {
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 15,
-    color: '#1a1a2e',
-    marginBottom: 2,
+    backgroundColor: '#fff', borderWidth: 1, borderColor: '#e0e0e0',
+    borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12,
+    fontSize: 15, color: '#1a1a2e', marginBottom: 2,
   },
   notesInput: { height: 88 },
 
-  shopRow: {
-    backgroundColor: '#fff',
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    borderBottomWidth: 1,
-    borderColor: '#f0f0f0',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  shopRowNumber: { fontWeight: '700', color: '#2563eb', fontSize: 13, minWidth: 48 },
-  shopRowName: { color: '#333', fontSize: 14 },
-  shopRowLocation: { color: '#aaa', fontSize: 11, marginTop: 1 },
-
-  selectedShop: {
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    padding: 14,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderWidth: 1.5,
-    borderColor: '#2563eb',
-  },
-  selectedShopPrimary: { fontWeight: '700', color: '#1a1a2e', fontSize: 15 },
-  selectedShopSub: { color: '#888', fontSize: 13, marginTop: 2 },
-  changeBtn: { color: '#2563eb', fontSize: 13, fontWeight: '600' },
-
   positionCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 10,
+    backgroundColor: '#fff', borderRadius: 12, padding: 14, marginBottom: 10,
   },
-  positionLabel: { fontSize: 15, fontWeight: '700', color: '#1a1a2e', marginBottom: 12 },
+  positionLabelRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12,
+  },
+  positionLabel: { fontSize: 15, fontWeight: '700', color: '#1a1a2e' },
+  photoCount: { fontSize: 12, color: '#aaa', fontWeight: '600' },
 
-  ratingRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
+  ratingRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
   ratingBtn: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: '#e0e0e0',
-    alignItems: 'center',
+    flex: 1, paddingVertical: 12, borderRadius: 8,
+    borderWidth: 2, borderColor: '#e0e0e0', alignItems: 'center',
   },
   ratingBtnActive: { borderColor: '#2563eb', backgroundColor: '#eff6ff' },
   ratingBtnText: { fontSize: 20, fontWeight: '800', color: '#ccc' },
   ratingBtnTextActive: { color: '#2563eb' },
 
-  photoBox: {
-    backgroundColor: '#f8f9fa',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderStyle: 'dashed',
-    height: 110,
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
+  photosRow: { gap: 8, paddingRight: 4 },
+  thumbWrapper: { width: 80, height: 80, borderRadius: 8, overflow: 'visible', position: 'relative' },
+  thumb: { width: 80, height: 80, borderRadius: 8 },
+  removePhotoBtn: {
+    position: 'absolute', top: -6, right: -6,
+    backgroundColor: '#fff', borderRadius: 10,
   },
-  photoPreview: { width: '100%', height: '100%' },
-  photoBoxText: { color: '#999', fontSize: 14 },
+  addPhotoBtn: {
+    width: 80, height: 80, borderRadius: 8,
+    backgroundColor: '#f8f9fa', borderWidth: 1.5,
+    borderColor: '#e0e0e0', borderStyle: 'dashed',
+    justifyContent: 'center', alignItems: 'center', gap: 4,
+  },
+  addPhotoText: { fontSize: 11, color: '#aaa', fontWeight: '600' },
 
   submitBtn: {
-    backgroundColor: '#2563eb',
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginTop: 28,
+    backgroundColor: '#2563eb', borderRadius: 12,
+    paddingVertical: 16, alignItems: 'center', marginTop: 28,
   },
   submitBtnDisabled: { opacity: 0.6 },
   submitBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
