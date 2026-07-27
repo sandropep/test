@@ -1,11 +1,13 @@
 import { ScrollView, StyleSheet } from 'react-native';
 import { AdminAnalytics } from '../../components/AdminAnalytics';
 import { ShopPerformanceLists } from '../../components/ShopPerformanceLists';
+import { UnvisitedShops } from '../../components/UnvisitedShops';
 
 export default function AnalyticsPage() {
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <AdminAnalytics />
+      <UnvisitedShops />
       <ShopPerformanceLists />
     </ScrollView>
   );

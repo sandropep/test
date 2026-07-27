@@ -7,6 +7,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../../lib/supabase';
+import { fetchAllRows } from '../../lib/fetchAllRows';
 
 const CATEGORY_COLORS: Record<string, string> = {
   A: '#16a34a', B: '#2563eb', C: '#d97706', D: '#dc2626',
@@ -44,6 +45,7 @@ function formatDateTime(createdAt: string) {
 function formatDateShort(d: Date) {
   return d.toLocaleDateString('ka-GE', { day: '2-digit', month: 'short' });
 }
+
 const startOfMonth = () => new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 function startOfWeek() {
   const d = new Date();
@@ -123,7 +125,7 @@ export default function AdminDashboard() {
     const todayStr = fmt(new Date());
     const monthStart = fmt(startOfMonth());
 
-    const [pendingRes, todayRes, monthRes, shopsRes, checkersRes] = await Promise.all([
+    const [pendingRes, todayRes, monthCountRes, shopsRes, checkersRes] = await Promise.all([
       supabase
         .from('visits')
         .select('id, date, created_at, score_percent, category, notes, shops(shop_number, name, location), checker:checker_id(full_name)')
@@ -136,7 +138,7 @@ export default function AdminDashboard() {
         .eq('date', todayStr),
       supabase
         .from('visits')
-        .select('shop_id, score_percent')
+        .select('id', { count: 'exact', head: true })
         .gte('date', monthStart)
         .lte('date', todayStr)
         .neq('status', 'rejected'),
@@ -150,15 +152,22 @@ export default function AdminDashboard() {
         .order('full_name'),
     ]);
 
-    const monthVisits = monthRes.data ?? [];
-    const monthScores = monthVisits.map((v: any) => v.score_percent).filter((s: any) => s != null);
+    const monthVisits = await fetchAllRows<{ shop_id: string; score_percent: number | null }>(() =>
+      supabase
+        .from('visits')
+        .select('shop_id, score_percent')
+        .gte('date', monthStart)
+        .lte('date', todayStr)
+        .neq('status', 'rejected')
+    );
+    const monthScores = monthVisits.map(v => v.score_percent).filter((s): s is number => s != null);
 
     setPending((pendingRes.data ?? []) as unknown as PendingVisit[]);
     setTodayCount(todayRes.count ?? 0);
-    setMonthShopCount(new Set(monthVisits.map((v: any) => v.shop_id)).size);
+    setMonthShopCount(new Set(monthVisits.map(v => v.shop_id)).size);
     setTotalShops(shopsRes.count ?? 0);
-    setMonthVisitCount(monthVisits.length);
-    setMonthAvgScore(monthScores.length > 0 ? Math.round(monthScores.reduce((s: number, n: number) => s + n, 0) / monthScores.length) : null);
+    setMonthVisitCount(monthCountRes.count ?? monthVisits.length);
+    setMonthAvgScore(monthScores.length > 0 ? Math.round(monthScores.reduce((s, n) => s + n, 0) / monthScores.length) : null);
     setCheckersList((checkersRes.data ?? []) as { id: string; full_name: string }[]);
   }, []);
 
