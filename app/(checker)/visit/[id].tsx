@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Image, Alert, ActivityIndicator, Platform,
+  Modal, StatusBar, SafeAreaView,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -76,6 +77,8 @@ export default function VisitDetail() {
   const [rejectionNote, setRejectionNote] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [lightboxUri, setLightboxUri] = useState<string | null>(null);
+  const [lightboxLabel, setLightboxLabel] = useState('');
 
   const readOnly = status === 'approved';
 
@@ -443,11 +446,15 @@ export default function VisitDetail() {
             >
               {posEntries.map((entry, rawIdx) => {
                 if (entry.markedForDelete) return null;
+                const activeIdx = posEntries.slice(0, rawIdx + 1).filter(e => !e.markedForDelete).length;
                 return (
                   <View key={rawIdx} style={styles.thumbWrapper}>
                     <TouchableOpacity
-                      onPress={() => !readOnly && replacePhoto(pos, rawIdx)}
-                      activeOpacity={readOnly ? 1 : 0.75}
+                      onPress={() => {
+                        setLightboxUri(entry.displayUri);
+                        setLightboxLabel(`${pos} ${activeIdx}/${activeCount}`);
+                      }}
+                      activeOpacity={0.75}
                     >
                       <Image source={{ uri: entry.displayUri! }} style={styles.thumb} />
                       {entry.localUri && !readOnly && (
@@ -457,13 +464,22 @@ export default function VisitDetail() {
                       )}
                     </TouchableOpacity>
                     {!readOnly && (
-                      <TouchableOpacity
-                        style={styles.removePhotoBtn}
-                        onPress={() => removePhotoEntry(pos, rawIdx)}
-                        hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
-                      >
-                        <Ionicons name="close-circle" size={20} color="#dc2626" />
-                      </TouchableOpacity>
+                      <>
+                        <TouchableOpacity
+                          style={styles.editPhotoBtn}
+                          onPress={() => replacePhoto(pos, rawIdx)}
+                          hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                        >
+                          <Ionicons name="pencil" size={12} color="#fff" />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.removePhotoBtn}
+                          onPress={() => removePhotoEntry(pos, rawIdx)}
+                          hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                        >
+                          <Ionicons name="close-circle" size={20} color="#dc2626" />
+                        </TouchableOpacity>
+                      </>
                     )}
                   </View>
                 );
@@ -513,6 +529,30 @@ export default function VisitDetail() {
       onPickCamera={handleWebPickCamera}
       onPickGallery={handleWebPickGallery}
     />
+    <Modal
+      visible={lightboxUri !== null}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setLightboxUri(null)}
+      statusBarTranslucent
+    >
+      <StatusBar backgroundColor="#000" barStyle="light-content" />
+      <View style={styles.lightboxBg}>
+        <SafeAreaView style={styles.lightboxSafe}>
+          <View style={styles.lightboxHeader}>
+            <Text style={styles.lightboxLabel}>{lightboxLabel}</Text>
+            <TouchableOpacity onPress={() => setLightboxUri(null)} style={styles.lightboxClose}>
+              <Ionicons name="close" size={28} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+        <TouchableOpacity style={styles.lightboxImageArea} activeOpacity={1} onPress={() => setLightboxUri(null)}>
+          {lightboxUri && (
+            <Image source={{ uri: lightboxUri }} style={styles.lightboxImage} resizeMode="contain" />
+          )}
+        </TouchableOpacity>
+      </View>
+    </Modal>
     </>
   );
 }
@@ -582,6 +622,12 @@ const styles = StyleSheet.create({
     position: 'absolute', top: -6, right: -6,
     backgroundColor: '#fff', borderRadius: 10,
   },
+  editPhotoBtn: {
+    position: 'absolute', bottom: -6, right: -6,
+    backgroundColor: '#2563eb', borderRadius: 10,
+    width: 20, height: 20, justifyContent: 'center', alignItems: 'center',
+    borderWidth: 2, borderColor: '#fff',
+  },
   changedBadge: {
     position: 'absolute', bottom: 4, left: 4, right: 4,
     backgroundColor: '#2563eb', borderRadius: 3,
@@ -609,4 +655,16 @@ const styles = StyleSheet.create({
   },
   saveBtnDisabled: { opacity: 0.6 },
   saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+
+  lightboxBg: { flex: 1, backgroundColor: '#000' },
+  lightboxSafe: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 },
+  lightboxHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 12,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  lightboxLabel: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  lightboxClose: { padding: 4 },
+  lightboxImageArea: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  lightboxImage: { width: '100%', height: '100%' },
 });

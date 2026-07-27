@@ -6,6 +6,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { BarChart } from 'react-native-gifted-charts';
 import { supabase } from '../lib/supabase';
+import { fetchAllRows } from '../lib/fetchAllRows';
 
 const CATEGORY_COLORS: Record<string, string> = {
   A: '#16a34a', B: '#2563eb', C: '#d97706', D: '#dc2626',
@@ -19,7 +20,12 @@ const PRESETS: { key: DatePreset; label: string }[] = [
   { key: 'last_month', label: 'წინა თვე' },
 ];
 
-const fmtDate = (d: Date) => d.toISOString().split('T')[0];
+const fmtDate = (d: Date) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
 
 function datesForPreset(p: DatePreset): { from: Date; to: Date } {
   const now = new Date();
@@ -35,80 +41,64 @@ function datesForPreset(p: DatePreset): { from: Date; to: Date } {
   }
 }
 
-function getWeekStart(d: Date): Date {
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  const mon = new Date(d);
-  mon.setDate(d.getDate() + diff);
-  mon.setHours(0, 0, 0, 0);
-  return mon;
-}
-
 interface Checker { id: string; full_name: string }
 interface Shop { id: string; shop_number: string; name: string; location: string | null }
 interface VisitRow { date: string; score_percent: number; category: string }
-interface BarItem { value: number; label: string; frontColor: string; topLabelComponent?: () => React.ReactNode }
+interface BarItem {
+  value: number; label: string; frontColor: string; spacing?: number;
+  labelTextStyle?: object;
+  topLabelComponent?: () => React.ReactNode;
+}
 
-function topLabel(avg: number) {
-  if (avg === 0) return undefined;
+const CATEGORY_ORDER = ['A', 'B', 'C', 'D'] as const;
+const WITHIN_GROUP_SPACING = 2;
+const GROUP_GAP_SPACING = 12;
+const CHART_INITIAL_SPACING = 12;
+
+function countLabel(count: number) {
+  if (count === 0) return undefined;
   return () => (
-    <Text style={{ fontSize: 8, fontWeight: '700', color: avgColor(avg), marginBottom: 2 }}>
-      {avg}%
+    <Text style={{ fontSize: 9, fontWeight: '800', color: '#1a1a2e', marginBottom: 3 }}>
+      {count}
     </Text>
   );
 }
 
-function avgColor(score: number): string {
-  if (score >= 90) return '#16a34a';
-  if (score >= 75) return '#2563eb';
-  if (score >= 60) return '#d97706';
-  return '#dc2626';
-}
-
-function buildChartData(
+// One group of 4 side-by-side bars (A/B/C/D) per day, rather than stacked,
+// so each category's count is independently readable at a glance.
+function buildGroupedCategoryData(
   visits: VisitRow[], from: Date, to: Date,
-  mode: 'perVisit' | 'perDay' | 'perWeek',
-): BarItem[] {
-  if (mode === 'perVisit') {
-    return visits.map(v => {
-      const d = new Date(v.date + 'T00:00:00');
-      return {
-        value: v.score_percent,
-        label: `${d.getDate()}/${d.getMonth() + 1}`,
-        frontColor: CATEGORY_COLORS[v.category] ?? '#2563eb',
-        topLabelComponent: topLabel(v.score_percent),
-      };
-    });
-  }
+): { items: BarItem[]; groupDates: string[] } {
+  const buckets: Record<string, Record<string, number>> = {};
 
-  if (mode === 'perDay') {
-    const dayMap: Record<string, number[]> = {};
-    const cur = new Date(from); cur.setHours(0, 0, 0, 0);
-    const end = new Date(to); end.setHours(0, 0, 0, 0);
-    while (cur <= end) { dayMap[fmtDate(cur)] = []; cur.setDate(cur.getDate() + 1); }
-    visits.forEach(v => { if (dayMap[v.date] !== undefined) dayMap[v.date].push(v.score_percent); });
-    return Object.entries(dayMap).map(([date, scores]) => {
-      const d = new Date(date + 'T00:00:00');
-      const avg = scores.length > 0 ? Math.round(scores.reduce((s, n) => s + n, 0) / scores.length) : 0;
-      return { value: avg, label: `${d.getDate()}/${d.getMonth() + 1}`, frontColor: avg > 0 ? avgColor(avg) : '#e0e0e0', topLabelComponent: topLabel(avg) };
-    });
-  }
+  const cur = new Date(from); cur.setHours(0, 0, 0, 0);
+  const end = new Date(to); end.setHours(0, 0, 0, 0);
+  while (cur <= end) { buckets[fmtDate(cur)] = { A: 0, B: 0, C: 0, D: 0 }; cur.setDate(cur.getDate() + 1); }
 
-  // perWeek
-  const weekMap: Record<string, number[]> = {};
-  const cur = new Date(getWeekStart(from));
-  while (cur <= to) { weekMap[fmtDate(cur)] = []; cur.setDate(cur.getDate() + 7); }
   visits.forEach(v => {
-    const ws = fmtDate(getWeekStart(new Date(v.date + 'T00:00:00')));
-    if (weekMap[ws] !== undefined) weekMap[ws].push(v.score_percent);
+    if (buckets[v.date] && buckets[v.date][v.category] !== undefined) buckets[v.date][v.category]++;
   });
-  return Object.entries(weekMap)
+
+  const items: BarItem[] = [];
+  const groupDates: string[] = [];
+  Object.entries(buckets)
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, scores]) => {
+    .filter(([, counts]) => CATEGORY_ORDER.some(cat => counts[cat] > 0))
+    .forEach(([date, counts]) => {
       const d = new Date(date + 'T00:00:00');
-      const avg = scores.length > 0 ? Math.round(scores.reduce((s, n) => s + n, 0) / scores.length) : 0;
-      return { value: avg, label: `${d.getDate()}/${d.getMonth() + 1}`, frontColor: avg > 0 ? avgColor(avg) : '#e0e0e0', topLabelComponent: topLabel(avg) };
+      groupDates.push(`${d.getDate()}/${d.getMonth() + 1}`);
+      CATEGORY_ORDER.forEach((cat, i) => {
+        items.push({
+          value: counts[cat],
+          label: cat,
+          labelTextStyle: { color: CATEGORY_COLORS[cat], fontSize: 10, fontWeight: '800' },
+          frontColor: counts[cat] > 0 ? CATEGORY_COLORS[cat] : '#e5e5e5',
+          spacing: i === CATEGORY_ORDER.length - 1 ? GROUP_GAP_SPACING : WITHIN_GROUP_SPACING,
+          topLabelComponent: countLabel(counts[cat]),
+        });
+      });
     });
+  return { items, groupDates };
 }
 
 export function AdminAnalytics() {
@@ -148,25 +138,25 @@ export function AdminAnalytics() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    let q = supabase
-      .from('visits')
-      .select('date, score_percent, category')
-      .eq('status', 'approved')
-      .gte('date', fmtDate(from))
-      .lte('date', fmtDate(to))
-      .order('date', { ascending: true });
-    if (selectedChecker) q = (q as any).eq('checker_id', selectedChecker);
-    if (selectedShop) q = (q as any).eq('shop_id', selectedShop.id);
-    const { data } = await q;
-    setVisits((data ?? []) as VisitRow[]);
+    const rows = await fetchAllRows<VisitRow>(() => {
+      let q = supabase
+        .from('visits')
+        .select('date, score_percent, category')
+        .eq('status', 'approved')
+        .gte('date', fmtDate(from))
+        .lte('date', fmtDate(to))
+        .order('date', { ascending: true });
+      if (selectedChecker) q = (q as any).eq('checker_id', selectedChecker);
+      if (selectedShop) q = (q as any).eq('shop_id', selectedShop.id);
+      return q;
+    });
+    setVisits(rows);
     setLoading(false);
   }, [from, to, selectedChecker, selectedShop]);
 
   useEffect(() => { load(); }, [load]);
 
-  const daySpan = Math.round((to.getTime() - from.getTime()) / 86400000);
-  const mode = selectedShop ? 'perVisit' : daySpan <= 14 ? 'perDay' : 'perWeek';
-  const barData = buildChartData(visits, from, to, mode);
+  const { items: barData, groupDates } = buildGroupedCategoryData(visits, from, to);
   const totalVisits = visits.length;
   const avgScore = totalVisits > 0
     ? Math.round(visits.reduce((s, v) => s + v.score_percent, 0) / totalVisits)
@@ -175,11 +165,23 @@ export function AdminAnalytics() {
   const scoreColor = avgScore == null ? '#1a1a2e'
     : avgScore >= 90 ? '#16a34a' : avgScore >= 75 ? '#2563eb' : avgScore >= 60 ? '#d97706' : '#dc2626';
 
-  const barCount = barData.length || 1;
-  const itemWidth = Math.floor((chartWidth - 40) / barCount);
-  const barWidth = Math.max(12, Math.min(36, itemWidth - 8));
-  const spacing = Math.max(4, itemWidth - barWidth);
-  const chartYMax = 100;
+  const MIN_BAR_WIDTH = 6;
+  const MAX_BAR_WIDTH = 60;
+  const numGroups = Math.max(1, groupDates.length);
+  const totalSpacing = numGroups * (WITHIN_GROUP_SPACING * (CATEGORY_ORDER.length - 1) + GROUP_GAP_SPACING);
+  // Stretch bars to fill the full chart width when there's room (e.g. a 7-day view);
+  // once a day-by-day month view no longer fits even at the minimum legible width,
+  // keep that minimum and let the chart scroll horizontally instead of squishing further.
+  const idealBarWidth = Math.floor((chartWidth - 24 - totalSpacing) / (barData.length || 1));
+  const barWidth = Math.max(MIN_BAR_WIDTH, Math.min(MAX_BAR_WIDTH, idealBarWidth));
+  // The "core" span is just the 4 bars + the small gaps between them — the date label
+  // centers over this. GROUP_GAP_SPACING is the separator *after* that, rendered as its
+  // own spacer, so it doesn't get included in (and skew) the centering math.
+  const coreGroupWidth = CATEGORY_ORDER.length * barWidth + (CATEGORY_ORDER.length - 1) * WITHIN_GROUP_SPACING;
+  const groupWidth = coreGroupWidth + GROUP_GAP_SPACING;
+  const chartContentWidth = Math.max(chartWidth, numGroups * groupWidth + CHART_INITIAL_SPACING + 24);
+  const maxCount = Math.max(...barData.map(b => b.value), 1);
+  const chartYMax = Math.max(1, Math.ceil(maxCount * 1.3));
 
   const checkerName = selectedChecker
     ? (checkers.find(c => c.id === selectedChecker)?.full_name ?? '—')
@@ -310,23 +312,51 @@ export function AdminAnalytics() {
         </View>
       ) : (
         <View style={{ overflow: 'hidden' }}>
-          <BarChart
-            data={barData}
-            width={chartWidth}
-            barWidth={barWidth}
-            spacing={spacing}
-            initialSpacing={12}
-            roundedTop
-            xAxisThickness={0}
-            yAxisThickness={0}
-            yAxisTextStyle={styles.axisText}
-            xAxisLabelTextStyle={styles.axisText}
-            noOfSections={4}
-            maxValue={chartYMax}
-            hideRules={false}
-            rulesColor="#f0f0f0"
-            isAnimated
-          />
+          <View style={styles.chartCaptionRow}>
+            <Text style={styles.chartCaption}>კატეგორიების განაწილება (დღეების მიხედვით)</Text>
+            <View style={styles.legendRow}>
+              {CATEGORY_ORDER.map(cat => (
+                <View key={cat} style={styles.legendItem}>
+                  <View style={[styles.legendDot, { backgroundColor: CATEGORY_COLORS[cat] }]} />
+                  <Text style={styles.legendText}>{cat}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={chartContentWidth > chartWidth}>
+            <View style={{ width: chartContentWidth }}>
+              <BarChart
+                data={barData}
+                width={chartContentWidth}
+                barWidth={barWidth}
+                initialSpacing={CHART_INITIAL_SPACING}
+                xAxisThickness={0}
+                yAxisThickness={0}
+                yAxisTextStyle={styles.axisText}
+                xAxisLabelTextStyle={styles.axisText}
+                noOfSections={4}
+                maxValue={chartYMax}
+                hideRules={false}
+                rulesColor="#f0f0f0"
+                topLabelTextStyle={styles.topLabelText}
+                isAnimated
+              />
+              <View style={[styles.dateRow, { paddingLeft: CHART_INITIAL_SPACING }]}>
+                {groupDates.map((date, i) => (
+                  <View key={i} style={styles.dateGroup}>
+                    <Text style={[styles.dateRowText, { width: coreGroupWidth }]} numberOfLines={1}>
+                      {date}
+                    </Text>
+                    {i < groupDates.length - 1 && (
+                      <View style={[styles.dateDividerWrap, { width: GROUP_GAP_SPACING }]}>
+                        <View style={styles.dateDivider} />
+                      </View>
+                    )}
+                  </View>
+                ))}
+              </View>
+            </View>
+          </ScrollView>
         </View>
       )}
 
@@ -436,6 +466,24 @@ const styles = StyleSheet.create({
   },
 
   chartPlaceholder: { height: 100, justifyContent: 'center', alignItems: 'center' },
+  chartCaptionRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  chartCaption: {
+    fontSize: 10, fontWeight: '700', color: '#aaa',
+    textTransform: 'uppercase', letterSpacing: 0.6, flexShrink: 1,
+  },
+  legendRow: { flexDirection: 'row', gap: 8 },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  legendDot: { width: 8, height: 8, borderRadius: 4 },
+  legendText: { fontSize: 10, fontWeight: '700', color: '#888' },
+  topLabelText: { fontSize: 9, fontWeight: '800', color: '#1a1a2e' },
+  dateRow: { flexDirection: 'row', marginTop: 6 },
+  dateGroup: { flexDirection: 'row', alignItems: 'flex-start' },
+  dateRowText: { fontSize: 10, fontWeight: '600', color: '#999', textAlign: 'center' },
+  dateDividerWrap: { alignItems: 'center' },
+  dateDivider: { width: 1, height: 10, backgroundColor: '#e5e5e5' },
   emptyText: { color: '#ccc', fontSize: 14 },
   axisText: { color: '#bbb', fontSize: 9 },
 
