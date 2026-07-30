@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
+import { fetchAllRows } from '../lib/fetchAllRows';
 
 const ROW_HEIGHT = 64;
 
@@ -29,14 +30,12 @@ export function ShopSelector({ selectedShop, onSelect, onClear, readOnly = false
   const [chainFilter, setChainFilter] = useState<string | null>(null);
 
   useEffect(() => {
-    supabase
-      .from('shops')
-      .select('id, shop_number, name, location')
-      .order('name')
-      .then(({ data }) => {
-        setAllShops(data ?? []);
-        setLoading(false);
-      });
+    fetchAllRows<Shop>(() =>
+      supabase.from('shops').select('id, shop_number, name, location').order('name')
+    ).then(data => {
+      setAllShops(data);
+      setLoading(false);
+    });
   }, []);
 
   const chains = useMemo(
