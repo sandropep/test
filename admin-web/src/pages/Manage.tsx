@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
+import { fetchAllRows } from '../lib/fetchAllRows';
 
 interface Shop { id: string; shop_number: string; name: string; location: string | null }
 interface Checker { id: string; full_name: string; email: string }
@@ -28,8 +29,10 @@ export default function Manage() {
   const [checkerSuccess, setCheckerSuccess] = useState('');
 
   const loadShops = useCallback(async () => {
-    const { data } = await supabase.from('shops').select('id, shop_number, name, location').order('shop_number');
-    setShops(data ?? []);
+    const data = await fetchAllRows<Shop>(() =>
+      supabase.from('shops').select('id, shop_number, name, location').order('shop_number')
+    );
+    setShops(data);
   }, []);
 
   const loadCheckers = useCallback(async () => {

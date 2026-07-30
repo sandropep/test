@@ -7,6 +7,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import { toCheckerEmail } from '../../lib/checkerEmail';
+import { fetchAllRows } from '../../lib/fetchAllRows';
 
 interface Shop { id: string; shop_number: string; name: string; location: string | null }
 interface Checker { id: string; full_name: string }
@@ -53,9 +54,10 @@ export default function ManagePage() {
   }, [shops, shopChainFilter, shopSearch]);
 
   const loadShops = useCallback(async () => {
-    const { data } = await supabase
-      .from('shops').select('id, shop_number, name, location').order('shop_number');
-    setShops(data ?? []);
+    const data = await fetchAllRows<Shop>(() =>
+      supabase.from('shops').select('id, shop_number, name, location').order('shop_number')
+    );
+    setShops(data);
   }, []);
 
   const loadCheckers = useCallback(async () => {
