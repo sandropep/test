@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import * as XLSX from 'xlsx';
 import { supabase } from '../lib/supabase';
 import { fetchAllRows } from '../lib/fetchAllRows';
 
@@ -44,8 +45,11 @@ export function UnvisitedShops() {
     const monthStart = fmt(startOfMonth());
     const todayStr = fmt(new Date());
 
-    const [shopsRes, visitedRows] = await Promise.all([
-      supabase.from('shops').select('id, shop_number, name, location'),
+    const [allShops, visitedRows] = await Promise.all([
+      // Paginated, since shop count can exceed Supabase's 1000-row default cap.
+      fetchAllRows<Shop>(() =>
+        supabase.from('shops').select('id, shop_number, name, location')
+      ),
       // Paginated, since a month's visits can exceed Supabase's 1000-row default cap.
       fetchAllRows<{ shop_id: string }>(() =>
         supabase
@@ -57,7 +61,6 @@ export function UnvisitedShops() {
       ),
     ]);
 
-    const allShops = (shopsRes.data ?? []) as Shop[];
     const visitedIds = new Set(visitedRows.map(v => v.shop_id));
     const unvisited = allShops.filter(s => !visitedIds.has(s.id));
     unvisited.sort((a, b) => a.shop_number.localeCompare(b.shop_number, undefined, { numeric: true }));
@@ -73,6 +76,15 @@ export function UnvisitedShops() {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { setVisibleCount(PAGE_SIZE); }, [chainFilter]);
+
+  function handleExport() {
+    const headers = ['მაღაზია #', 'სახელი', 'მისამართი'];
+    const rows = filteredShops.map(s => [s.shop_number, s.name, s.location ?? '']);
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'არ მოინახულეს');
+    XLSX.writeFile(wb, `unvisited_shops_${fmt(new Date())}.xlsx`);
+  }
 
   if (loading) {
     return (
@@ -96,6 +108,16 @@ export function UnvisitedShops() {
             {filteredShops.length}{chainFilter ? `/${shops.length}` : ''}
           </Text>
         </View>
+        {filteredShops.length > 0 && (
+          <TouchableOpacity
+            style={styles.exportBtn}
+            onPress={(e: any) => { e.stopPropagation?.(); handleExport(); }}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="download-outline" size={14} color="#16a34a" />
+            <Text style={styles.exportBtnText}>Excel</Text>
+          </TouchableOpacity>
+        )}
         <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color="#71717a" style={{ marginLeft: 'auto' }} />
       </TouchableOpacity>
 
@@ -193,6 +215,12 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 18, fontWeight: '800', color: '#52525b' },
   countBadge: { borderRadius: 12, paddingHorizontal: 9, paddingVertical: 2, minWidth: 26, alignItems: 'center', backgroundColor: '#71717a' },
   countBadgeText: { fontSize: 13, fontWeight: '800', color: '#fff' },
+  exportBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    borderRadius: 12, paddingHorizontal: 10, paddingVertical: 5,
+    borderWidth: 1.5, borderColor: '#16a34a40', backgroundColor: '#f0fdf4',
+  },
+  exportBtnText: { fontSize: 12, fontWeight: '700', color: '#16a34a' },
   emptyText: { fontSize: 12, color: '#bbb', paddingVertical: 12, paddingLeft: 4 },
 
   chainScroll: { marginTop: 10, width: '100%' },

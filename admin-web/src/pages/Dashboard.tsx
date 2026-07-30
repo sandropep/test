@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { fetchAllRows } from '../lib/fetchAllRows';
 
 interface Visit {
   id: string;
@@ -43,28 +44,31 @@ export default function Dashboard() {
 
   useEffect(() => {
     Promise.all([
-      supabase.from('shops').select('id, shop_number, name').order('shop_number'),
+      fetchAllRows<Shop>(() =>
+        supabase.from('shops').select('id, shop_number, name').order('shop_number')
+      ),
       supabase.from('users').select('id, full_name, email').eq('role', 'checker').order('full_name'),
-    ]).then(([{ data: s }, { data: c }]) => {
-      setShops(s ?? []);
+    ]).then(([s, { data: c }]) => {
+      setShops(s);
       setCheckers(c ?? []);
     });
   }, []);
 
   useEffect(() => {
     setLoading(true);
-    let q = supabase
-      .from('visits')
-      .select('id, date, score_percent, category, checker_id, shop_id')
-      .order('date', { ascending: false });
+    fetchAllRows<Visit>(() => {
+      let q = supabase
+        .from('visits')
+        .select('id, date, score_percent, category, checker_id, shop_id')
+        .order('date', { ascending: false });
 
-    if (fromDate) q = q.gte('date', fromDate);
-    if (toDate) q = q.lte('date', toDate);
-    if (checkerId) q = q.eq('checker_id', checkerId);
-    if (shopId) q = q.eq('shop_id', shopId);
-
-    q.then(({ data }) => {
-      setVisits(data ?? []);
+      if (fromDate) q = q.gte('date', fromDate);
+      if (toDate) q = q.lte('date', toDate);
+      if (checkerId) q = q.eq('checker_id', checkerId);
+      if (shopId) q = q.eq('shop_id', shopId);
+      return q;
+    }).then(data => {
+      setVisits(data);
       setLoading(false);
     });
   }, [fromDate, toDate, checkerId, shopId]);

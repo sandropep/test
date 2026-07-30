@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import * as XLSX from 'xlsx';
 import { supabase } from '../../lib/supabase';
+import { fetchAllRows } from '../../lib/fetchAllRows';
 
 const CATEGORY_COLORS: Record<string, string> = {
   A: '#16a34a', B: '#2563eb', C: '#d97706', D: '#dc2626',
@@ -212,17 +213,18 @@ export default function VisitsList() {
   }, [load]);
 
   async function handleExport() {
-    let q = supabase
-      .from('visits')
-      .select('date, created_at, score_percent, category, warehouse_rating, fridge_rating, shelf_rating, notes, shops(shop_number, name), checker:checker_id(full_name)')
-      .order('date', { ascending: false });
-    q = q.gte('date', fmt(fromDate));
-    q = q.lte('date', fmt(toDate));
-    if (statusFilter !== 'all') q = q.eq('status', statusFilter);
-    if (selectedChecker) q = q.eq('checker_id', selectedChecker);
-    if (selectedShop) q = q.eq('shop_id', selectedShop.id);
-
-    const { data } = await q;
+    const data = await fetchAllRows<any>(() => {
+      let q = supabase
+        .from('visits')
+        .select('date, created_at, score_percent, category, warehouse_rating, fridge_rating, shelf_rating, notes, shops(shop_number, name), checker:checker_id(full_name)')
+        .order('date', { ascending: false });
+      q = q.gte('date', fmt(fromDate));
+      q = q.lte('date', fmt(toDate));
+      if (statusFilter !== 'all') q = q.eq('status', statusFilter);
+      if (selectedChecker) q = q.eq('checker_id', selectedChecker);
+      if (selectedShop) q = q.eq('shop_id', selectedShop.id);
+      return q;
+    });
     if (!data?.length) {
       if (Platform.OS === 'web') window.alert('საექსპორტო მონაცემი არ მოიძებნა');
       else Alert.alert('', 'საექსპორტო მონაცემი არ მოიძებნა');

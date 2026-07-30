@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { supabase } from '../lib/supabase';
+import { fetchAllRows } from '../lib/fetchAllRows';
 
 interface Visit {
   id: string;
@@ -47,10 +48,12 @@ export default function Visits() {
 
   useEffect(() => {
     Promise.all([
-      supabase.from('shops').select('id, shop_number, name').order('shop_number'),
+      fetchAllRows<Shop>(() =>
+        supabase.from('shops').select('id, shop_number, name').order('shop_number')
+      ),
       supabase.from('users').select('id, full_name, email').eq('role', 'checker').order('full_name'),
-    ]).then(([{ data: s }, { data: c }]) => {
-      setShops(s ?? []);
+    ]).then(([s, { data: c }]) => {
+      setShops(s);
       setCheckers(c ?? []);
     });
   }, []);
@@ -78,18 +81,19 @@ export default function Visits() {
     setExporting(true);
 
     // Fetch full detail for all matching visits (no limit), join checker directly
-    let q = supabase
-      .from('visits')
-      .select('id, date, score_percent, category, checker_id, shop_id, notes, warehouse_rating, fridge_rating, shelf_rating, checker:checker_id(full_name, email)')
-      .order('date', { ascending: false });
+    const data = await fetchAllRows<ExportVisit & { checker: { full_name: string; email: string } | null }>(() => {
+      let q = supabase
+        .from('visits')
+        .select('id, date, score_percent, category, checker_id, shop_id, notes, warehouse_rating, fridge_rating, shelf_rating, checker:checker_id(full_name, email)')
+        .order('date', { ascending: false });
 
-    if (fromDate) q = q.gte('date', fromDate);
-    if (toDate) q = q.lte('date', toDate);
-    if (checkerId) q = q.eq('checker_id', checkerId);
-    if (shopId) q = q.eq('shop_id', shopId);
-
-    const { data } = await q;
-    const rows = (data ?? []) as (ExportVisit & { checker: { full_name: string; email: string } | null })[];
+      if (fromDate) q = q.gte('date', fromDate);
+      if (toDate) q = q.lte('date', toDate);
+      if (checkerId) q = q.eq('checker_id', checkerId);
+      if (shopId) q = q.eq('shop_id', shopId);
+      return q;
+    });
+    const rows = data;
 
     // --- Column definitions: change label or field here to customise ---
     const sheetData = rows.map(v => ({
