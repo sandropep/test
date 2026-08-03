@@ -32,7 +32,7 @@ interface CheckerRow {
   avgCategory: string | null;
 }
 
-type ActivityPeriod = 'today' | 'week' | 'month' | 'all' | 'custom';
+type ActivityPeriod = 'today' | 'week' | 'month' | 'lastMonth' | 'all' | 'custom';
 
 const fmt = (d: Date) => {
   const y = d.getFullYear();
@@ -57,6 +57,12 @@ function showInfo(title: string, msg: string) {
 }
 
 const startOfMonth = () => new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+function lastMonthRange() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const end = new Date(now.getFullYear(), now.getMonth(), 0);
+  return { start, end };
+}
 function startOfWeek() {
   const d = new Date();
   const day = d.getDay();
@@ -71,6 +77,8 @@ export default function AdminDashboard() {
   const router = useRouter();
 
   const [pending, setPending] = useState<PendingVisit[]>([]);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [pendingExpanded, setPendingExpanded] = useState(true);
   const [todayCount, setTodayCount] = useState(0);
   const [monthShopCount, setMonthShopCount] = useState(0);
   const [totalShops, setTotalShops] = useState(0);
@@ -135,13 +143,17 @@ export default function AdminDashboard() {
     const todayStr = fmt(new Date());
     const monthStart = fmt(startOfMonth());
 
-    const [pendingRes, todayRes, monthCountRes, shopsRes, checkersRes] = await Promise.all([
+    const [pendingRes, pendingCountRes, todayRes, monthCountRes, shopsRes, checkersRes] = await Promise.all([
       supabase
         .from('visits')
         .select('id, date, created_at, score_percent, category, notes, shops(shop_number, name, location), checker:checker_id(full_name)')
         .eq('status', 'pending')
         .order('date', { ascending: false })
         .limit(50),
+      supabase
+        .from('visits')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'pending'),
       supabase
         .from('visits')
         .select('id', { count: 'exact', head: true })
@@ -173,6 +185,7 @@ export default function AdminDashboard() {
     const monthScores = monthVisits.map(v => v.score_percent).filter((s): s is number => s != null);
 
     setPending((pendingRes.data ?? []) as unknown as PendingVisit[]);
+    setPendingCount(pendingCountRes.count ?? 0);
     setTodayCount(todayRes.count ?? 0);
     setMonthShopCount(new Set(monthVisits.map(v => v.shop_id)).size);
     setTotalShops(shopsRes.count ?? 0);
@@ -194,27 +207,32 @@ export default function AdminDashboard() {
     setActivityLoading(true);
     const todayStr = fmt(new Date());
 
-    let query = supabase
-      .from('visits')
-      .select('checker_id, score_percent, category')
-      .neq('status', 'rejected');
+    const data = await fetchAllRows<{ checker_id: string; score_percent: number | null; category: string | null }>(() => {
+      let query = supabase
+        .from('visits')
+        .select('checker_id, score_percent, category')
+        .neq('status', 'rejected');
 
-    if (period === 'today') {
-      query = query.eq('date', todayStr);
-    } else if (period === 'week') {
-      query = query.gte('date', fmt(startOfWeek())).lte('date', todayStr);
-    } else if (period === 'month') {
-      query = query.gte('date', fmt(startOfMonth())).lte('date', todayStr);
-    } else if (period === 'custom') {
-      query = query.gte('date', fmt(customFrom)).lte('date', fmt(customTo));
-    }
-    // 'all' → no date filter
+      if (period === 'today') {
+        query = query.eq('date', todayStr);
+      } else if (period === 'week') {
+        query = query.gte('date', fmt(startOfWeek())).lte('date', todayStr);
+      } else if (period === 'month') {
+        query = query.gte('date', fmt(startOfMonth())).lte('date', todayStr);
+      } else if (period === 'lastMonth') {
+        const { start, end } = lastMonthRange();
+        query = query.gte('date', fmt(start)).lte('date', fmt(end));
+      } else if (period === 'custom') {
+        query = query.gte('date', fmt(customFrom)).lte('date', fmt(customTo));
+      }
+      // 'all' → no date filter
+      return query;
+    });
 
-    const { data } = await query;
-
-    const byChecker: Record<string, { scores: number[]; categories: string[] }> = {};
-    (data ?? []).forEach((v: any) => {
-      if (!byChecker[v.checker_id]) byChecker[v.checker_id] = { scores: [], categories: [] };
+    const byChecker: Record<string, { count: number; scores: number[]; categories: string[] }> = {};
+    data.forEach(v => {
+      if (!byChecker[v.checker_id]) byChecker[v.checker_id] = { count: 0, scores: [], categories: [] };
+      byChecker[v.checker_id].count++;
       if (v.score_percent != null) byChecker[v.checker_id].scores.push(v.score_percent);
       if (v.category) byChecker[v.checker_id].categories.push(v.category);
     });
@@ -225,7 +243,7 @@ export default function AdminDashboard() {
       const avgScore = scores.length > 0 ? Math.round(scores.reduce((s, n) => s + n, 0) / scores.length) : null;
       const avgCategory = avgScore == null ? null
         : avgScore >= 90 ? 'A' : avgScore >= 75 ? 'B' : avgScore >= 60 ? 'C' : 'D';
-      return { id: c.id, full_name: c.full_name || '—', visitCount: entry ? scores.length : 0, avgScore, avgCategory };
+      return { id: c.id, full_name: c.full_name || '—', visitCount: entry?.count ?? 0, avgScore, avgCategory };
     });
 
     rows.sort((a, b) => b.visitCount - a.visitCount);
@@ -284,7 +302,7 @@ export default function AdminDashboard() {
       <View style={styles.statRow}>
         <View style={[styles.statCard, hasPending && styles.statCardUrgent]}>
           <Text style={[styles.statValue, hasPending && { color: '#d97706' }]}>
-            {pending.length}
+            {pendingCount}
           </Text>
           <View style={styles.statLabelRow}>
             <Text style={styles.statLabel}>განსახილველი</Text>
@@ -350,16 +368,32 @@ export default function AdminDashboard() {
       </View>
 
       {/* ── Pending visits ── */}
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>დასადასტურებელი ვიზიტები</Text>
+      <TouchableOpacity
+        style={styles.collapsibleHeader}
+        onPress={() => setPendingExpanded(e => !e)}
+        activeOpacity={0.7}
+      >
+        <Ionicons name="time-outline" size={20} color="#d97706" />
+        <Text style={styles.collapsibleTitle}>დასადასტურებელი ვიზიტები</Text>
         {hasPending && (
           <View style={styles.countBadge}>
-            <Text style={styles.countBadgeText}>{pending.length}</Text>
+            <Text style={styles.countBadgeText}>{pendingCount}</Text>
           </View>
         )}
-      </View>
+        <Ionicons
+          name={pendingExpanded ? 'chevron-up' : 'chevron-down'}
+          size={18}
+          color="#d97706"
+          style={{ marginLeft: 'auto' }}
+        />
+      </TouchableOpacity>
+      {pendingExpanded && pendingCount > pending.length && (
+        <Text style={styles.pendingCapNote}>
+          ნაჩვენებია უახლესი {pending.length} — სულ {pendingCount}
+        </Text>
+      )}
 
-      {!hasPending ? (
+      {!pendingExpanded ? null : !hasPending ? (
         <View style={styles.emptyCard}>
           <Ionicons name="checkmark-circle" size={28} color="#16a34a" />
           <Text style={styles.emptyTitle}>დასადასტურებელი ვიზიტი არ არის</Text>
@@ -446,7 +480,7 @@ export default function AdminDashboard() {
           </View>
 
           <View style={styles.periodRow}>
-            {(['today', 'week', 'month', 'all'] as const).map(p => (
+            {(['today', 'week', 'month', 'lastMonth', 'all'] as const).map(p => (
               <TouchableOpacity
                 key={p}
                 style={[styles.periodPill, activityPeriod === p && styles.periodPillActive]}
@@ -454,7 +488,7 @@ export default function AdminDashboard() {
                 activeOpacity={0.7}
               >
                 <Text style={[styles.periodPillText, activityPeriod === p && styles.periodPillTextActive]}>
-                  {p === 'today' ? 'დღეს' : p === 'week' ? 'ეს კვირა' : p === 'month' ? 'ეს თვე' : 'ყველა'}
+                  {p === 'today' ? 'დღეს' : p === 'week' ? 'ეს კვირა' : p === 'month' ? 'ეს თვე' : p === 'lastMonth' ? 'წინა თვე' : 'ყველა'}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -574,10 +608,19 @@ const styles = StyleSheet.create({
   statSub: { fontSize: 10, color: '#bbb', marginTop: 1 },
 
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+  collapsibleHeader: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingVertical: 12, paddingHorizontal: 14,
+    borderRadius: 12, borderWidth: 1.5,
+    backgroundColor: '#d9770612', borderColor: '#d9770630',
+    marginBottom: 10,
+  },
   sectionTitle: {
     fontSize: 11, fontWeight: '700', color: '#888',
     textTransform: 'uppercase', letterSpacing: 0.8,
   },
+  collapsibleTitle: { fontSize: 16, fontWeight: '800', color: '#92400e' },
+  pendingCapNote: { fontSize: 11, color: '#aaa', marginTop: -6, marginBottom: 10 },
   countBadge: {
     backgroundColor: '#d97706', borderRadius: 10,
     paddingHorizontal: 7, paddingVertical: 1,
