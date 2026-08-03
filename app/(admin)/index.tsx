@@ -34,7 +34,12 @@ interface CheckerRow {
 
 type ActivityPeriod = 'today' | 'week' | 'month' | 'all' | 'custom';
 
-const fmt = (d: Date) => d.toISOString().split('T')[0];
+const fmt = (d: Date) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
 function formatDateTime(createdAt: string) {
   const d = new Date(createdAt);
   const month = d.toLocaleDateString('ka-GE', { month: 'short' });
@@ -44,6 +49,11 @@ function formatDateTime(createdAt: string) {
 }
 function formatDateShort(d: Date) {
   return d.toLocaleDateString('ka-GE', { day: '2-digit', month: 'short' });
+}
+
+function showInfo(title: string, msg: string) {
+  if (Platform.OS === 'web') window.alert(`${title}\n\n${msg}`);
+  else Alert.alert(title, msg);
 }
 
 const startOfMonth = () => new Date(new Date().getFullYear(), new Date().getMonth(), 1);
@@ -276,7 +286,15 @@ export default function AdminDashboard() {
           <Text style={[styles.statValue, hasPending && { color: '#d97706' }]}>
             {pending.length}
           </Text>
-          <Text style={styles.statLabel}>განსახილველი</Text>
+          <View style={styles.statLabelRow}>
+            <Text style={styles.statLabel}>განსახილველი</Text>
+            <TouchableOpacity
+              onPress={() => showInfo('განსახილველი', 'ვიზიტები სტატუსით „მოლოდინში" — ელოდება თქვენს დადასტურებას ან უარყოფას.')}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="information-circle-outline" size={13} color="#bbb" />
+            </TouchableOpacity>
+          </View>
           {hasPending && (
             <View style={styles.statDot} />
           )}
@@ -284,18 +302,42 @@ export default function AdminDashboard() {
 
         <View style={styles.statCard}>
           <Text style={[styles.statValue, { color: '#2563eb' }]}>{todayCount}</Text>
-          <Text style={styles.statLabel}>დღეს</Text>
+          <View style={styles.statLabelRow}>
+            <Text style={styles.statLabel}>დღეს</Text>
+            <TouchableOpacity
+              onPress={() => showInfo('დღეს', 'დღეს დამატებული ყველა ვიზიტი, სტატუსის მიუხედავად (დადასტურებული, მოლოდინში და უარყოფილიც).')}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="information-circle-outline" size={13} color="#bbb" />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <View style={styles.statCard}>
           <Text style={[styles.statValue, { color: '#16a34a' }]}>{monthShopCount}</Text>
-          <Text style={styles.statLabel}>მაღაზია</Text>
+          <View style={styles.statLabelRow}>
+            <Text style={styles.statLabel}>მაღაზია</Text>
+            <TouchableOpacity
+              onPress={() => showInfo('მაღაზია', 'რამდენი განსხვავებული მაღაზია მოინახულეს ამ თვეს (უარყოფილი ვიზიტების გარეშე), სულ მაღაზიების რაოდენობიდან.')}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="information-circle-outline" size={13} color="#bbb" />
+            </TouchableOpacity>
+          </View>
           <Text style={styles.statSub}>სულ {totalShops} მაღაზიიდან</Text>
         </View>
 
         <View style={styles.statCard}>
           <Text style={[styles.statValue, { color: '#7c3aed' }]}>{monthVisitCount}</Text>
-          <Text style={styles.statLabel}>ვიზიტი ამ თვეს</Text>
+          <View style={styles.statLabelRow}>
+            <Text style={styles.statLabel}>ვიზიტი ამ თვეს</Text>
+            <TouchableOpacity
+              onPress={() => showInfo('ვიზიტი ამ თვეს', 'ამ თვის ვიზიტების რაოდენობა (უარყოფილის გარეშე) და საშუალო ქულა.')}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="information-circle-outline" size={13} color="#bbb" />
+            </TouchableOpacity>
+          </View>
           <Text style={[
             styles.statSub,
             monthAvgScore != null && { color: CATEGORY_COLORS[
@@ -527,7 +569,8 @@ const styles = StyleSheet.create({
     width: 7, height: 7, borderRadius: 4, backgroundColor: '#d97706',
   },
   statValue: { fontSize: 30, fontWeight: '800', color: '#1a1a2e', lineHeight: 34 },
-  statLabel: { fontSize: 11, color: '#888', fontWeight: '600', marginTop: 2 },
+  statLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 2 },
+  statLabel: { fontSize: 11, color: '#888', fontWeight: '600' },
   statSub: { fontSize: 10, color: '#bbb', marginTop: 1 },
 
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },

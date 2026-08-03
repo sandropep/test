@@ -57,6 +57,7 @@ export default function MyStats() {
 
     const twoMonthsAgo = new Date();
     twoMonthsAgo.setDate(twoMonthsAgo.getDate() - 70);
+    const twoMonthsAgoStr = `${twoMonthsAgo.getFullYear()}-${String(twoMonthsAgo.getMonth() + 1).padStart(2, '0')}-${String(twoMonthsAgo.getDate()).padStart(2, '0')}`;
 
     const [profileRes, visitsRes, totalRes] = await Promise.all([
       supabase.from('users').select('full_name').eq('id', user.id).single(),
@@ -64,7 +65,7 @@ export default function MyStats() {
         .from('visits')
         .select('date, score_percent, category, status')
         .eq('checker_id', user.id)
-        .gte('date', twoMonthsAgo.toISOString().split('T')[0])
+        .gte('date', twoMonthsAgoStr)
         .order('date', { ascending: false }),
       supabase
         .from('visits')

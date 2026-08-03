@@ -81,7 +81,8 @@ export default function CheckerHome() {
     setVisits(allVisits);
     setRejectedVisits((rejectedRes.data as unknown as Visit[]) ?? []);
 
-    const today = new Date().toISOString().split('T')[0];
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     setTodayCount(allVisits.filter(v => v.date === today).length);
   }, []);
 
