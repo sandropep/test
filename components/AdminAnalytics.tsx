@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, Modal, Pressable, TextInput,
-  StyleSheet, ActivityIndicator, Dimensions, ScrollView,
+  StyleSheet, ActivityIndicator, Dimensions, ScrollView, Platform, Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { BarChart } from 'react-native-gifted-charts';
@@ -11,6 +11,11 @@ import { fetchAllRows } from '../lib/fetchAllRows';
 const CATEGORY_COLORS: Record<string, string> = {
   A: '#16a34a', B: '#2563eb', C: '#d97706', D: '#dc2626',
 };
+
+function showInfo(title: string, msg: string) {
+  if (Platform.OS === 'web') window.alert(`${title}\n\n${msg}`);
+  else Alert.alert(title, msg);
+}
 
 type DatePreset = 'today' | 'week' | 'month' | 'last_month';
 const PRESETS: { key: DatePreset; label: string }[] = [
@@ -43,7 +48,7 @@ function datesForPreset(p: DatePreset): { from: Date; to: Date } {
 
 interface Checker { id: string; full_name: string }
 interface Shop { id: string; shop_number: string; name: string; location: string | null }
-interface VisitRow { date: string; score_percent: number; category: string }
+interface VisitRow { date: string; score_percent: number; category: string; shop_id: string }
 interface BarItem {
   value: number; label: string; frontColor: string; spacing?: number;
   labelTextStyle?: object;
@@ -141,7 +146,7 @@ export function AdminAnalytics() {
     const rows = await fetchAllRows<VisitRow>(() => {
       let q = supabase
         .from('visits')
-        .select('date, score_percent, category')
+        .select('date, score_percent, category, shop_id')
         .eq('status', 'approved')
         .gte('date', fmtDate(from))
         .lte('date', fmtDate(to))
@@ -158,6 +163,7 @@ export function AdminAnalytics() {
 
   const { items: barData, groupDates } = buildGroupedCategoryData(visits, from, to);
   const totalVisits = visits.length;
+  const uniqueShops = new Set(visits.map(v => v.shop_id)).size;
   const avgScore = totalVisits > 0
     ? Math.round(visits.reduce((s, v) => s + v.score_percent, 0) / totalVisits)
     : null;
@@ -291,13 +297,41 @@ export function AdminAnalytics() {
       <View style={styles.statsRow}>
         <View style={styles.statCard}>
           <Text style={styles.statValue}>{totalVisits}</Text>
-          <Text style={styles.statLabel}>ვიზიტი</Text>
+          <View style={styles.statLabelRow}>
+            <Text style={styles.statLabel}>ვიზიტი</Text>
+            <TouchableOpacity
+              onPress={() => showInfo('ვიზიტი', 'დადასტურებული ვიზიტების რაოდენობა არჩეულ პერიოდსა და ფილტრებში (ჩეკერი/მაღაზია, თუ არჩეულია).')}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="information-circle-outline" size={13} color="#bbb" />
+            </TouchableOpacity>
+          </View>
+        </View>
+        <View style={[styles.statCard, styles.statCardBorder]}>
+          <Text style={styles.statValue}>{uniqueShops}</Text>
+          <View style={styles.statLabelRow}>
+            <Text style={styles.statLabel}>მაღაზია</Text>
+            <TouchableOpacity
+              onPress={() => showInfo('მაღაზია', 'რამდენი განსხვავებული მაღაზია მოინახულეს არჩეულ პერიოდსა და ფილტრებში (დადასტურებული ვიზიტების მიხედვით).')}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="information-circle-outline" size={13} color="#bbb" />
+            </TouchableOpacity>
+          </View>
         </View>
         <View style={[styles.statCard, styles.statCardBorder]}>
           <Text style={[styles.statValue, { color: scoreColor }]}>
             {avgScore != null ? `${avgScore}%` : '—'}
           </Text>
-          <Text style={styles.statLabel}>საშ. ქულა</Text>
+          <View style={styles.statLabelRow}>
+            <Text style={styles.statLabel}>საშ. ქულა</Text>
+            <TouchableOpacity
+              onPress={() => showInfo('საშ. ქულა', 'არჩეული პერიოდის დადასტურებული ვიზიტების საშუალო ქულა (%).')}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="information-circle-outline" size={13} color="#bbb" />
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
 
@@ -460,8 +494,9 @@ const styles = StyleSheet.create({
   statCard: { flex: 1, alignItems: 'center', paddingVertical: 12 },
   statCardBorder: { borderLeftWidth: 1, borderLeftColor: '#ebebeb' },
   statValue: { fontSize: 22, fontWeight: '800', color: '#1a1a2e', lineHeight: 26 },
+  statLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 3 },
   statLabel: {
-    fontSize: 10, color: '#aaa', fontWeight: '600', marginTop: 3,
+    fontSize: 10, color: '#aaa', fontWeight: '600',
     textTransform: 'uppercase', letterSpacing: 0.5,
   },
 
