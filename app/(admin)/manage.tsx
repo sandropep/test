@@ -28,6 +28,9 @@ export default function ManagePage() {
   const [customChainMode, setCustomChainMode] = useState(false);
   const [shopSearch, setShopSearch] = useState('');
   const [shopChainFilter, setShopChainFilter] = useState<string | null>(null);
+  const [shopCheckerMap, setShopCheckerMap] = useState<Record<string, string>>({});
+  const [checkerPickerShop, setCheckerPickerShop] = useState<Shop | null>(null);
+  const [assigningShopId, setAssigningShopId] = useState<string | null>(null);
 
   // ── Checkers ──
   const [checkers, setCheckers] = useState<Checker[]>([]);
@@ -41,6 +44,12 @@ export default function ManagePage() {
     () => Array.from(new Set(shops.map(s => s.name).filter(Boolean))).sort(),
     [shops]
   );
+
+  const checkerNameById = useMemo(() => {
+    const map: Record<string, string> = {};
+    checkers.forEach(c => { map[c.id] = c.full_name; });
+    return map;
+  }, [checkers]);
 
   const filteredShops = useMemo(() => {
     let list = shops;
@@ -66,9 +75,19 @@ export default function ManagePage() {
     setCheckers((data ?? []) as Checker[]);
   }, []);
 
+  const loadShopCheckers = useCallback(async () => {
+    const data = await fetchAllRows<{ shop_id: string; checker_id: string }>(() =>
+      supabase.from('shop_checkers').select('shop_id, checker_id')
+    );
+    const map: Record<string, string> = {};
+    data.forEach(row => { map[row.shop_id] = row.checker_id; });
+    setShopCheckerMap(map);
+  }, []);
+
   useEffect(() => {
     loadShops().finally(() => setShopsLoading(false));
     loadCheckers().finally(() => setCheckersLoading(false));
+    loadShopCheckers();
   }, []);
 
   async function handleAddShop() {
@@ -113,6 +132,28 @@ export default function ManagePage() {
         { text: 'წაშლა', style: 'destructive', onPress: doDelete },
       ]);
     }
+  }
+
+  async function handleAssignChecker(shop: Shop, checkerId: string | null) {
+    setAssigningShopId(shop.id);
+    const { error } = checkerId
+      ? await supabase.from('shop_checkers')
+          .upsert({ shop_id: shop.id, checker_id: checkerId, updated_at: new Date().toISOString() }, { onConflict: 'shop_id' })
+      : await supabase.from('shop_checkers').delete().eq('shop_id', shop.id);
+
+    if (error) {
+      if (Platform.OS === 'web') window.alert(error.message);
+      else Alert.alert('შეცდომა', error.message);
+    } else {
+      setShopCheckerMap(prev => {
+        const next = { ...prev };
+        if (checkerId) next[shop.id] = checkerId;
+        else delete next[shop.id];
+        return next;
+      });
+      setCheckerPickerShop(null);
+    }
+    setAssigningShopId(null);
   }
 
   async function handleAddChecker() {
@@ -364,27 +405,76 @@ export default function ManagePage() {
           </Text>
           {shopsLoading
             ? <ActivityIndicator color="#2563eb" style={{ marginTop: 24 }} />
-            : filteredShops.map(shop => (
-              <View key={shop.id} style={styles.listRow}>
-                <View style={styles.listLeft}>
-                  <Text style={styles.listPrimary}>#{shop.shop_number} — {shop.name}</Text>
-                  {shop.location && <Text style={styles.listSub}>{shop.location}</Text>}
+            : filteredShops.map(shop => {
+              const assignedId = shopCheckerMap[shop.id];
+              return (
+                <View key={shop.id} style={styles.listRow}>
+                  <View style={styles.listLeft}>
+                    <Text style={styles.listPrimary}>#{shop.shop_number} — {shop.name}</Text>
+                    {shop.location && <Text style={styles.listSub}>{shop.location}</Text>}
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.checkerChip, assignedId && styles.checkerChipAssigned]}
+                    onPress={() => setCheckerPickerShop(shop)}
+                    disabled={assigningShopId === shop.id}
+                  >
+                    {assigningShopId === shop.id ? (
+                      <ActivityIndicator size="small" color="#2563eb" />
+                    ) : (
+                      <>
+                        <Ionicons name="person-outline" size={12} color={assignedId ? '#2563eb' : '#aaa'} />
+                        <Text style={[styles.checkerChipText, assignedId && styles.checkerChipTextAssigned]} numberOfLines={1}>
+                          {assignedId ? (checkerNameById[assignedId] ?? '…') : 'ჩეკერის გარაშე'}
+                        </Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.deleteBtn}
+                    onPress={() => handleDeleteShop(shop)}
+                    disabled={deletingShop === shop.id}
+                  >
+                    {deletingShop === shop.id
+                      ? <ActivityIndicator size="small" color="#dc2626" />
+                      : <Ionicons name="trash-outline" size={18} color="#dc2626" />
+                    }
+                  </TouchableOpacity>
                 </View>
-                <TouchableOpacity
-                  style={styles.deleteBtn}
-                  onPress={() => handleDeleteShop(shop)}
-                  disabled={deletingShop === shop.id}
-                >
-                  {deletingShop === shop.id
-                    ? <ActivityIndicator size="small" color="#dc2626" />
-                    : <Ionicons name="trash-outline" size={18} color="#dc2626" />
-                  }
-                </TouchableOpacity>
-              </View>
-            ))
+              );
+            })
           }
         </ScrollView>
       )}
+
+      {/* Checker assignment picker */}
+      <Modal visible={!!checkerPickerShop} transparent animationType="fade">
+        <Pressable style={styles.modalOverlay} onPress={() => setCheckerPickerShop(null)}>
+          <Pressable style={styles.modalSheet}>
+            <Text style={styles.modalTitle} numberOfLines={1}>
+              ჩეკერი — #{checkerPickerShop?.shop_number} {checkerPickerShop?.name}
+            </Text>
+            <ScrollView style={{ maxHeight: 320 }}>
+              <TouchableOpacity
+                style={[styles.modalRow, !shopCheckerMap[checkerPickerShop?.id ?? ''] && styles.modalRowActive]}
+                onPress={() => checkerPickerShop && handleAssignChecker(checkerPickerShop, null)}
+              >
+                <Text style={[styles.modalRowText, { color: '#888' }]}>ჩეკერის გარაშე</Text>
+                {!shopCheckerMap[checkerPickerShop?.id ?? ''] && <Ionicons name="checkmark" size={18} color="#2563eb" />}
+              </TouchableOpacity>
+              {checkers.map(c => (
+                <TouchableOpacity
+                  key={c.id}
+                  style={[styles.modalRow, shopCheckerMap[checkerPickerShop?.id ?? ''] === c.id && styles.modalRowActive]}
+                  onPress={() => checkerPickerShop && handleAssignChecker(checkerPickerShop, c.id)}
+                >
+                  <Text style={styles.modalRowText}>{c.full_name}</Text>
+                  {shopCheckerMap[checkerPickerShop?.id ?? ''] === c.id && <Ionicons name="checkmark" size={18} color="#2563eb" />}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* ── Checkers ── */}
       {tab === 'checkers' && (
@@ -553,6 +643,16 @@ const styles = StyleSheet.create({
   listPrimary: { fontSize: 14, fontWeight: '700', color: '#1a1a2e', marginBottom: 2 },
   listSub: { fontSize: 12, color: '#888' },
   deleteBtn: { padding: 6 },
+
+  checkerChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 0,
+    paddingHorizontal: 10, paddingVertical: 6,
+    borderRadius: 20, backgroundColor: '#f0f2f5',
+    borderWidth: 1.5, borderColor: 'transparent',
+  },
+  checkerChipAssigned: { backgroundColor: '#eff6ff', borderColor: '#2563eb40' },
+  checkerChipText: { fontSize: 11, fontWeight: '600', color: '#aaa' },
+  checkerChipTextAssigned: { color: '#2563eb' },
 
   searchBar: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
