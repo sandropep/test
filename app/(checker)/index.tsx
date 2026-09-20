@@ -12,6 +12,7 @@ import {
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
+import { MyRemainingShops } from '../../components/MyRemainingShops';
 
 const CATEGORY_COLORS: Record<string, string> = {
   A: '#16a34a', B: '#2563eb', C: '#d97706', D: '#dc2626',
@@ -53,10 +54,13 @@ export default function CheckerHome() {
   const [todayCount, setTodayCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
+    setUserId(user.id);
 
     const [profileRes, visitsRes, rejectedRes] = await Promise.all([
       supabase.from('users').select('full_name').eq('id', user.id).single(),
@@ -84,6 +88,7 @@ export default function CheckerHome() {
     const now = new Date();
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     setTodayCount(allVisits.filter(v => v.date === today).length);
+    setReloadKey(k => k + 1);
   }, []);
 
   useEffect(() => {
@@ -181,6 +186,9 @@ export default function CheckerHome() {
           </>
         );
       })()}
+
+      {/* Shops still left to visit this month */}
+      <MyRemainingShops userId={userId} reloadKey={reloadKey} />
 
       {/* Recent visits (non-rejected) */}
       <Text style={styles.sectionTitle}>ბოლო ვიზიტები</Text>

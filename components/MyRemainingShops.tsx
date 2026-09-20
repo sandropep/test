@@ -2,32 +2,29 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import * as XLSX from 'xlsx';
 import { supabase } from '../lib/supabase';
-import { fetchAllRows } from '../lib/fetchAllRows';
 import { fetchVisitedShopIdsThisMonth } from '../lib/visitedThisMonth';
 
 interface Shop { id: string; shop_number: string; name: string; location: string | null }
 
 const PAGE_SIZE = 10;
-const fmt = (d: Date) => {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-};
 
-export function UnvisitedShops() {
+interface Props {
+  userId: string | null;
+  reloadKey: number;
+}
+
+export function MyRemainingShops({ userId, reloadKey }: Props) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [shops, setShops] = useState<Shop[]>([]);
   const [chainTotals, setChainTotals] = useState<Record<string, number>>({});
+  const [totalAssigned, setTotalAssigned] = useState(0);
   const [expanded, setExpanded] = useState(true);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [chainFilter, setChainFilter] = useState<string | null>(null);
-  const [checkerByShopId, setCheckerByShopId] = useState<Record<string, string>>({});
 
-  const chainUnvisitedCounts = useMemo(() => {
+  const chainRemainingCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     shops.forEach(s => { counts[s.name] = (counts[s.name] ?? 0) + 1; });
     return counts;
@@ -42,45 +39,47 @@ export function UnvisitedShops() {
   );
 
   const load = useCallback(async () => {
+    if (!userId) { setShops([]); setChainTotals({}); setTotalAssigned(0); setLoading(false); return; }
     setLoading(true);
 
-    const [allShops, visitedIds, assignments] = await Promise.all([
-      // Paginated, since shop count can exceed Supabase's 1000-row default cap.
-      fetchAllRows<Shop>(() =>
-        supabase.from('shops').select('id, shop_number, name, location')
-      ),
+    const [assignedRes, visitedIds] = await Promise.all([
+      supabase
+        .from('shop_checkers')
+        .select('shop_id, shops(id, shop_number, name, location)')
+        .eq('checker_id', userId),
       fetchVisitedShopIdsThisMonth(),
-      fetchAllRows<{ shop_id: string; checker: { full_name: string } | null }>(() =>
-        supabase.from('shop_checkers').select('shop_id, checker:users!checker_id(full_name)')
-      ),
     ]);
 
-    const unvisited = allShops.filter(s => !visitedIds.has(s.id));
-    unvisited.sort((a, b) => a.shop_number.localeCompare(b.shop_number, undefined, { numeric: true }));
+    const assignedShops = ((assignedRes.data ?? []) as any[])
+      .map(r => r.shops)
+      .filter(Boolean) as Shop[];
+
+    const remaining = assignedShops.filter(s => !visitedIds.has(s.id));
+    remaining.sort((a, b) => a.shop_number.localeCompare(b.shop_number, undefined, { numeric: true }));
 
     const totals: Record<string, number> = {};
-    allShops.forEach(s => { totals[s.name] = (totals[s.name] ?? 0) + 1; });
+    assignedShops.forEach(s => { totals[s.name] = (totals[s.name] ?? 0) + 1; });
 
-    const checkerMap: Record<string, string> = {};
-    assignments.forEach(a => { if (a.checker?.full_name) checkerMap[a.shop_id] = a.checker.full_name; });
-
-    setShops(unvisited);
+    setShops(remaining);
     setChainTotals(totals);
-    setCheckerByShopId(checkerMap);
+    setTotalAssigned(assignedShops.length);
     setVisibleCount(PAGE_SIZE);
     setLoading(false);
-  }, []);
+  }, [userId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); }, [reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setVisibleCount(PAGE_SIZE); }, [chainFilter]);
 
-  function handleExport() {
-    const headers = ['მაღაზია #', 'სახელი', 'მისამართი', 'ჩეკერი'];
-    const rows = filteredShops.map(s => [s.shop_number, s.name, s.location ?? '', checkerByShopId[s.id] ?? '']);
-    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'არ მოინახულეს');
-    XLSX.writeFile(wb, `unvisited_shops_${fmt(new Date())}.xlsx`);
+  function handlePressShop(shop: Shop) {
+    router.push({
+      pathname: '/(checker)/new-visit',
+      params: {
+        shopId: shop.id,
+        shopNumber: shop.shop_number,
+        shopName: shop.name,
+        shopLocation: shop.location ?? '',
+      },
+    });
   }
 
   if (loading) {
@@ -91,6 +90,9 @@ export function UnvisitedShops() {
     );
   }
 
+  // No assignments at all yet — nothing useful to show.
+  if (totalAssigned === 0) return null;
+
   return (
     <View style={styles.container}>
       <TouchableOpacity
@@ -98,27 +100,17 @@ export function UnvisitedShops() {
         onPress={() => setExpanded(e => !e)}
         activeOpacity={0.7}
       >
-        <Ionicons name="alert-circle-outline" size={20} color="#71717a" />
-        <Text style={styles.sectionTitle}>არ მოინახულეს ამ თვეს</Text>
+        <Ionicons name="storefront-outline" size={20} color="#2563eb" />
+        <Text style={styles.sectionTitle}>შენ დარჩენილი მაღაზიები</Text>
         <View style={styles.countBadge}>
           <Text style={styles.countBadgeText}>
             {filteredShops.length}{chainFilter ? `/${shops.length}` : ''}
           </Text>
         </View>
-        {filteredShops.length > 0 && (
-          <TouchableOpacity
-            style={styles.exportBtn}
-            onPress={(e: any) => { e.stopPropagation?.(); handleExport(); }}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="download-outline" size={14} color="#16a34a" />
-            <Text style={styles.exportBtnText}>Excel</Text>
-          </TouchableOpacity>
-        )}
         <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color="#71717a" style={{ marginLeft: 'auto' }} />
       </TouchableOpacity>
 
-      {expanded && chains.length > 0 && (
+      {expanded && chains.length > 1 && (
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -141,7 +133,7 @@ export function UnvisitedShops() {
                 style={[styles.chainPillText, chainFilter === chain && styles.chainPillTextActive]}
                 numberOfLines={1}
               >
-                {chain} — {chainUnvisitedCounts[chain] ?? 0}/{chainTotals[chain] ?? 0}
+                {chain} — {chainRemainingCounts[chain] ?? 0}/{chainTotals[chain] ?? 0}
               </Text>
             </TouchableOpacity>
           ))}
@@ -151,7 +143,7 @@ export function UnvisitedShops() {
       {expanded && (
         filteredShops.length === 0 ? (
           <Text style={styles.emptyText}>
-            {chainFilter ? 'ამ ქსელის ყველა მაღაზია მონახულებულია ამ თვეს' : 'ყველა მაღაზია მონახულებულია ამ თვეს'}
+            {chainFilter ? 'ამ ქსელის ყველა თქვენი მაღაზია მონახულებულია ამ თვეს' : 'ამ თვეს ყველა თქვენი მაღაზია მონახულებულია'}
           </Text>
         ) : (
           <View style={styles.shopList}>
@@ -159,7 +151,7 @@ export function UnvisitedShops() {
               <TouchableOpacity
                 key={shop.id}
                 style={styles.shopCard}
-                onPress={() => router.push(`/(admin)/shop/${shop.id}` as any)}
+                onPress={() => handlePressShop(shop)}
                 activeOpacity={0.7}
               >
                 <View style={styles.shopCardAccent} />
@@ -199,7 +191,7 @@ export function UnvisitedShops() {
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#fff', borderRadius: 14, padding: 16, marginTop: 16,
+    backgroundColor: '#fff', borderRadius: 14, padding: 16, marginBottom: 24,
     shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05, shadowRadius: 4, elevation: 1,
   },
@@ -207,17 +199,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 10,
     paddingVertical: 12, paddingHorizontal: 14,
     borderRadius: 12, borderWidth: 1.5,
-    backgroundColor: '#71717a12', borderColor: '#71717a30',
+    backgroundColor: '#2563eb12', borderColor: '#2563eb30',
   },
-  sectionTitle: { fontSize: 18, fontWeight: '800', color: '#52525b' },
-  countBadge: { borderRadius: 12, paddingHorizontal: 9, paddingVertical: 2, minWidth: 26, alignItems: 'center', backgroundColor: '#71717a' },
+  sectionTitle: { fontSize: 18, fontWeight: '800', color: '#1d4ed8' },
+  countBadge: { borderRadius: 12, paddingHorizontal: 9, paddingVertical: 2, minWidth: 26, alignItems: 'center', backgroundColor: '#2563eb' },
   countBadgeText: { fontSize: 13, fontWeight: '800', color: '#fff' },
-  exportBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    borderRadius: 12, paddingHorizontal: 10, paddingVertical: 5,
-    borderWidth: 1.5, borderColor: '#16a34a40', backgroundColor: '#f0fdf4',
-  },
-  exportBtnText: { fontSize: 12, fontWeight: '700', color: '#16a34a' },
   emptyText: { fontSize: 12, color: '#bbb', paddingVertical: 12, paddingLeft: 4 },
 
   chainScroll: { marginTop: 10, width: '100%' },
@@ -227,9 +213,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20,
     backgroundColor: '#f0f2f5', borderWidth: 1.5, borderColor: 'transparent',
   },
-  chainPillActive: { backgroundColor: '#71717a18', borderColor: '#71717a' },
+  chainPillActive: { backgroundColor: '#2563eb18', borderColor: '#2563eb' },
   chainPillText: { fontSize: 12, fontWeight: '600', color: '#888' },
-  chainPillTextActive: { color: '#52525b' },
+  chainPillTextActive: { color: '#1d4ed8' },
 
   shopList: { gap: 10, marginTop: 10 },
   shopCard: {
@@ -239,7 +225,7 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.06, shadowRadius: 4, elevation: 1,
   },
-  shopCardAccent: { width: 5, backgroundColor: '#71717a' },
+  shopCardAccent: { width: 5, backgroundColor: '#2563eb' },
   shopCardBody: {
     flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10,
     paddingVertical: 12, paddingHorizontal: 12,
@@ -250,7 +236,7 @@ const styles = StyleSheet.create({
 
   loadMoreBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-    paddingVertical: 10, borderRadius: 10, borderWidth: 1.5, borderColor: '#71717a40', marginTop: 2,
+    paddingVertical: 10, borderRadius: 10, borderWidth: 1.5, borderColor: '#2563eb40', marginTop: 2,
   },
-  loadMoreText: { fontSize: 13, fontWeight: '700', color: '#71717a' },
+  loadMoreText: { fontSize: 13, fontWeight: '700', color: '#2563eb' },
 });

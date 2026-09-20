@@ -7,7 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { decode } from 'base64-arraybuffer';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import { ShopSelector } from '../../components/ShopSelector';
 import type { Shop } from '../../components/ShopSelector';
@@ -41,6 +41,7 @@ const MAX_PHOTOS = 5;
 
 export default function NewVisit() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ shopId?: string; shopNumber?: string; shopName?: string; shopLocation?: string }>();
   const [selectedShop, setSelectedShop] = useState<Shop | null>(null);
   const [ratings, setRatings] = useState<Partial<Record<Position, Rating>>>({});
   const [photos, setPhotos] = useState<Partial<Record<Position, string[]>>>({});
@@ -78,6 +79,24 @@ export default function NewVisit() {
         .then(({ data }) => setCheckerName(data?.full_name || user.email || 'unknown'));
     });
   }, []);
+
+  // Deep-linked from "შენ დარჩენილი მაღაზიები" — pre-select the shop and
+  // start a fresh form, since this screen is a Tabs.Screen that can stay
+  // mounted across tab switches (a stale ratings/photos carryover from a
+  // previously-picked shop must not survive a new shop deep-link).
+  useEffect(() => {
+    if (params.shopId) {
+      setSelectedShop({
+        id: params.shopId,
+        shop_number: params.shopNumber ?? '',
+        name: params.shopName ?? '',
+        location: params.shopLocation || null,
+      });
+      setRatings({});
+      setPhotos({});
+      setNotes('');
+    }
+  }, [params.shopId]);
 
   function addUri(position: Position, uri: string) {
     setPhotos(prev => ({

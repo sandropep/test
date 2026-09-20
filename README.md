@@ -114,3 +114,4 @@ npm run web
 | `users` | `id`, `role` (`admin`\|`checker`), `full_name`, `email` |
 | `shops` | `id`, `shop_number`, `name`, `location` |
 | `visits` | `id`, `shop_id`, `checker_id`, `date`, `score_percent`, `category`, `notes` |
+| `shop_checkers` | `shop_id` (PK), `checker_id` — the checker who "owns" a shop, separate from who actually performed a given visit; see `supabase/shop_checkers.sql` |
