@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, Platform, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as XLSX from 'xlsx';
@@ -10,6 +10,12 @@ import { fetchVisitedShopIdsThisMonth } from '../lib/visitedThisMonth';
 interface Shop { id: string; shop_number: string; name: string; location: string | null }
 
 const PAGE_SIZE = 10;
+const UNASSIGNED = '__unassigned__';
+
+function showInfo(title: string, msg: string) {
+  if (Platform.OS === 'web') window.alert(`${title}\n\n${msg}`);
+  else Alert.alert(title, msg);
+}
 const fmt = (d: Date) => {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -22,9 +28,11 @@ export function UnvisitedShops() {
   const [loading, setLoading] = useState(true);
   const [shops, setShops] = useState<Shop[]>([]);
   const [chainTotals, setChainTotals] = useState<Record<string, number>>({});
+  const [checkerTotals, setCheckerTotals] = useState<Record<string, number>>({});
   const [expanded, setExpanded] = useState(true);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [chainFilter, setChainFilter] = useState<string | null>(null);
+  const [checkerFilter, setCheckerFilter] = useState<string | null>(null);
   const [checkerByShopId, setCheckerByShopId] = useState<Record<string, string>>({});
 
   const chainUnvisitedCounts = useMemo(() => {
@@ -36,10 +44,25 @@ export function UnvisitedShops() {
     () => Array.from(new Set(shops.map(s => s.name).filter(Boolean))).sort(),
     [shops]
   );
-  const filteredShops = useMemo(
-    () => chainFilter ? shops.filter(s => s.name === chainFilter) : shops,
-    [shops, chainFilter]
+
+  const checkerKey = useCallback((s: Shop) => checkerByShopId[s.id] ?? UNASSIGNED, [checkerByShopId]);
+  const checkerUnvisitedCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    shops.forEach(s => { const k = checkerKey(s); counts[k] = (counts[k] ?? 0) + 1; });
+    return counts;
+  }, [shops, checkerKey]);
+  const checkerNames = useMemo(
+    () => Array.from(new Set(shops.map(s => checkerByShopId[s.id]).filter(Boolean))).sort() as string[],
+    [shops, checkerByShopId]
   );
+  const hasUnassigned = (checkerUnvisitedCounts[UNASSIGNED] ?? 0) > 0;
+
+  const filteredShops = useMemo(() => {
+    let list = shops;
+    if (chainFilter) list = list.filter(s => s.name === chainFilter);
+    if (checkerFilter) list = list.filter(s => checkerKey(s) === checkerFilter);
+    return list;
+  }, [shops, chainFilter, checkerFilter, checkerKey]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -64,15 +87,22 @@ export function UnvisitedShops() {
     const checkerMap: Record<string, string> = {};
     assignments.forEach(a => { if (a.checker?.full_name) checkerMap[a.shop_id] = a.checker.full_name; });
 
+    const checkerTotalsMap: Record<string, number> = {};
+    allShops.forEach(s => {
+      const k = checkerMap[s.id] ?? UNASSIGNED;
+      checkerTotalsMap[k] = (checkerTotalsMap[k] ?? 0) + 1;
+    });
+
     setShops(unvisited);
     setChainTotals(totals);
+    setCheckerTotals(checkerTotalsMap);
     setCheckerByShopId(checkerMap);
     setVisibleCount(PAGE_SIZE);
     setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [chainFilter]);
+  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [chainFilter, checkerFilter]);
 
   function handleExport() {
     const headers = ['მაღაზია #', 'სახელი', 'მისამართი', 'ჩეკერი'];
@@ -102,7 +132,7 @@ export function UnvisitedShops() {
         <Text style={styles.sectionTitle}>არ მოინახულეს ამ თვეს</Text>
         <View style={styles.countBadge}>
           <Text style={styles.countBadgeText}>
-            {filteredShops.length}{chainFilter ? `/${shops.length}` : ''}
+            {filteredShops.length}{(chainFilter || checkerFilter) ? `/${shops.length}` : ''}
           </Text>
         </View>
         {filteredShops.length > 0 && (
@@ -119,39 +149,99 @@ export function UnvisitedShops() {
       </TouchableOpacity>
 
       {expanded && chains.length > 0 && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.chainScroll}
-          contentContainerStyle={styles.chainScrollContent}
-        >
-          <TouchableOpacity
-            style={[styles.chainPill, !chainFilter && styles.chainPillActive]}
-            onPress={() => setChainFilter(null)}
+        <>
+          <Text style={styles.filterLabel}>ქსელი</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator
+            style={styles.chainScroll}
+            contentContainerStyle={styles.chainScrollContent}
           >
-            <Text style={[styles.chainPillText, !chainFilter && styles.chainPillTextActive]}>ყველა</Text>
-          </TouchableOpacity>
-          {chains.map(chain => (
             <TouchableOpacity
-              key={chain}
-              style={[styles.chainPill, chainFilter === chain && styles.chainPillActive]}
-              onPress={() => setChainFilter(prev => prev === chain ? null : chain)}
+              style={[styles.chainPill, !chainFilter && styles.chainPillActive]}
+              onPress={() => setChainFilter(null)}
             >
-              <Text
-                style={[styles.chainPillText, chainFilter === chain && styles.chainPillTextActive]}
-                numberOfLines={1}
-              >
-                {chain} — {chainUnvisitedCounts[chain] ?? 0}/{chainTotals[chain] ?? 0}
-              </Text>
+              <Text style={[styles.chainPillText, !chainFilter && styles.chainPillTextActive]}>ყველა</Text>
             </TouchableOpacity>
-          ))}
-        </ScrollView>
+            {chains.map(chain => (
+              <TouchableOpacity
+                key={chain}
+                style={[styles.chainPill, chainFilter === chain && styles.chainPillActive]}
+                onPress={() => setChainFilter(prev => prev === chain ? null : chain)}
+              >
+                <Text
+                  style={[styles.chainPillText, chainFilter === chain && styles.chainPillTextActive]}
+                  numberOfLines={1}
+                >
+                  {chain} — {chainUnvisitedCounts[chain] ?? 0}/{chainTotals[chain] ?? 0}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </>
+      )}
+
+      {expanded && (checkerNames.length > 0 || hasUnassigned) && (
+        <>
+          <View style={styles.filterLabelRow}>
+            <Text style={[styles.filterLabel, { marginTop: 0 }]}>ჩეკერი</Text>
+            <TouchableOpacity
+              onPress={() => showInfo(
+                'ჩეკერის ფილტრი',
+                'ფილტრი აჩვენებს კონკრეტული ჩეკერისთვის მიბმულ მაღაზიებს, რომლებიც ამ თვეს ჯერ არავის მოუნახულებია. თუ მაღაზია სხვა ჩეკერმა მოინახულა , ის მაინც აღარ გამოჩნდება სიაში — მიუხედავად იმისა, ვინ არის მასზე პასუხისმგებელი.'
+              )}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="information-circle-outline" size={13} color="#bbb" />
+            </TouchableOpacity>
+          </View>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator
+            style={styles.chainScroll}
+            contentContainerStyle={styles.chainScrollContent}
+          >
+            <TouchableOpacity
+              style={[styles.chainPill, !checkerFilter && styles.chainPillActive]}
+              onPress={() => setCheckerFilter(null)}
+            >
+              <Text style={[styles.chainPillText, !checkerFilter && styles.chainPillTextActive]}>ყველა</Text>
+            </TouchableOpacity>
+            {checkerNames.map(checker => (
+              <TouchableOpacity
+                key={checker}
+                style={[styles.chainPill, checkerFilter === checker && styles.chainPillActive]}
+                onPress={() => setCheckerFilter(prev => prev === checker ? null : checker)}
+              >
+                <Text
+                  style={[styles.chainPillText, checkerFilter === checker && styles.chainPillTextActive]}
+                  numberOfLines={1}
+                >
+                  {checker} — {checkerUnvisitedCounts[checker] ?? 0}/{checkerTotals[checker] ?? 0}
+                </Text>
+              </TouchableOpacity>
+            ))}
+            {hasUnassigned && (
+              <TouchableOpacity
+                style={[styles.chainPill, checkerFilter === UNASSIGNED && styles.chainPillActive]}
+                onPress={() => setCheckerFilter(prev => prev === UNASSIGNED ? null : UNASSIGNED)}
+              >
+                <Text
+                  style={[styles.chainPillText, checkerFilter === UNASSIGNED && styles.chainPillTextActive]}
+                  numberOfLines={1}
+                >
+                  ჩეკერის გარეშე — {checkerUnvisitedCounts[UNASSIGNED] ?? 0}/{checkerTotals[UNASSIGNED] ?? 0}
+                </Text>
+              </TouchableOpacity>
+            )}
+          </ScrollView>
+        </>
       )}
 
       {expanded && (
         filteredShops.length === 0 ? (
           <Text style={styles.emptyText}>
-            {chainFilter ? 'ამ ქსელის ყველა მაღაზია მონახულებულია ამ თვეს' : 'ყველა მაღაზია მონახულებულია ამ თვეს'}
+            {(chainFilter || checkerFilter) ? 'ამ ფილტრით ყველა მაღაზია მონახულებულია ამ თვეს' : 'ყველა მაღაზია მონახულებულია ამ თვეს'}
           </Text>
         ) : (
           <View style={styles.shopList}>
@@ -220,7 +310,15 @@ const styles = StyleSheet.create({
   exportBtnText: { fontSize: 12, fontWeight: '700', color: '#16a34a' },
   emptyText: { fontSize: 12, color: '#bbb', paddingVertical: 12, paddingLeft: 4 },
 
-  chainScroll: { marginTop: 10, width: '100%' },
+  filterLabel: {
+    fontSize: 10, fontWeight: '700', color: '#aaa',
+    textTransform: 'uppercase', letterSpacing: 0.6,
+    marginTop: 10, marginLeft: 2,
+  },
+  filterLabelRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+  },
+  chainScroll: { marginTop: 14, marginBottom: 6, width: '100%' },
   chainScrollContent: { flexDirection: 'row', gap: 6, paddingRight: 4 },
   chainPill: {
     flexShrink: 0,
