@@ -60,6 +60,7 @@ export default function AdminVisitDetail() {
   const [lightboxLabel, setLightboxLabel] = useState('');
   const [rejectModalVisible, setRejectModalVisible] = useState(false);
   const [rejectNoteInput, setRejectNoteInput] = useState('');
+  const [photosLoadFailed, setPhotosLoadFailed] = useState(false);
 
   const load = useCallback(async () => {
     const { data, error } = await supabase
@@ -77,10 +78,14 @@ export default function AdminVisitDetail() {
 
     setVisit(data as unknown as VisitData);
 
-    const { data: photoRows } = await supabase
+    const { data: photoRows, error: photosError } = await supabase
       .from('photos').select('position, storage_path').eq('visit_id', id);
 
-    if (photoRows?.length) {
+    if (photosError) {
+      // Don't claim "this shop doesn't have X" below when we don't actually
+      // know that — we just failed to load the photos.
+      setPhotosLoadFailed(true);
+    } else if (photoRows?.length) {
       const urlMap = await getSignedUrls(photoRows.map(r => r.storage_path));
       setPhotos(photoRows.map(row => ({
         position: row.position as Position,
@@ -276,7 +281,9 @@ export default function AdminVisitDetail() {
               </ScrollView>
             ) : (
               <View style={styles.noPhoto}>
-                <Text style={styles.noPhotoText}>ფოტო არ არის</Text>
+                <Text style={styles.noPhotoText}>
+                  {photosLoadFailed ? 'ფოტო ვერ ჩაიტვირთა' : `ამ მაღაზიას არ აქვს ${pos}`}
+                </Text>
               </View>
             )}
           </View>

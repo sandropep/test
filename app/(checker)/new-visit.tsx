@@ -45,6 +45,7 @@ export default function NewVisit() {
   const [selectedShop, setSelectedShop] = useState<Shop | null>(null);
   const [ratings, setRatings] = useState<Partial<Record<Position, Rating>>>({});
   const [photos, setPhotos] = useState<Partial<Record<Position, string[]>>>({});
+  const [notApplicable, setNotApplicable] = useState<Partial<Record<Position, boolean>>>({});
   const [pickerTarget, setPickerTarget] = useState<Position | null>(null);
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -55,8 +56,38 @@ export default function NewVisit() {
     setSelectedShop(null);
     setRatings({});
     setPhotos({});
+    setNotApplicable({});
     setNotes('');
   }, []);
+
+  function clearPosition(pos: Position) {
+    setRatings(prev => { const next = { ...prev }; delete next[pos]; return next; });
+    setPhotos(prev => { const next = { ...prev }; delete next[pos]; return next; });
+  }
+
+  function toggleNotApplicable(pos: Position) {
+    const turningOn = !notApplicable[pos];
+    const hasData = turningOn && (!!ratings[pos] || (photos[pos]?.length ?? 0) > 0);
+
+    const apply = () => {
+      setNotApplicable(prev => ({ ...prev, [pos]: !prev[pos] }));
+      // Clear whatever was picked for this position either way, so toggling
+      // off doesn't resurrect a rating/photos entered before toggling on.
+      clearPosition(pos);
+    };
+
+    if (!hasData) { apply(); return; }
+
+    const msg = `${pos}-ისთვის უკვე შერჩეული რეიტინგი და ფოტოები წაიშლება. გავაგრძელოთ?`;
+    if (Platform.OS === 'web') {
+      if (window.confirm(msg)) apply();
+      return;
+    }
+    Alert.alert('წაიშლება', msg, [
+      { text: 'გაუქმება', style: 'cancel' },
+      { text: 'დიახ', style: 'destructive', onPress: apply },
+    ]);
+  }
 
   const handleReset = useCallback(() => {
     if (Platform.OS === 'web') {
@@ -94,6 +125,7 @@ export default function NewVisit() {
       });
       setRatings({});
       setPhotos({});
+      setNotApplicable({});
       setNotes('');
     }
   }, [params.shopId]);
@@ -164,9 +196,12 @@ export default function NewVisit() {
     };
     if (!selectedShop) { err('აირჩიეთ მაღაზია'); return; }
     for (const pos of POSITIONS) {
+      if (notApplicable[pos]) continue;
       if (!ratings[pos]) { err(`მონიშნეთ რეიტინგი: ${pos}`); return; }
       if (!(photos[pos]?.length)) { err(`გადაიღეთ ფოტო: ${pos}`); return; }
     }
+
+    const ratingFor = (pos: Position): Rating => notApplicable[pos] ? 'A' : ratings[pos]!;
 
     setSubmitting(true);
     const uploadedPaths: Array<{ pos: Position; path: string }> = [];
@@ -178,6 +213,7 @@ export default function NewVisit() {
 
       // Step 1: upload all photos before touching the DB
       for (const pos of POSITIONS) {
+        if (notApplicable[pos]) continue;
         const uris = photos[pos] ?? [];
         for (let idx = 0; idx < uris.length; idx++) {
           const storagePath = `${safeName}/${selectedShop.shop_number}/${POSITION_PATH[pos]}_${idx}_${timestamp}.jpg`;
@@ -195,26 +231,29 @@ export default function NewVisit() {
         .insert({
           shop_id: selectedShop.id,
           checker_id: userId,
-          warehouse_rating: ratings['საწყობი'],
-          fridge_rating: ratings['მაცივარი'],
-          shelf_rating: ratings['თარო'],
+          warehouse_rating: ratingFor('საწყობი'),
+          fridge_rating: ratingFor('მაცივარი'),
+          shelf_rating: ratingFor('თარო'),
           notes: notes.trim() || null,
         })
         .select('id')
         .single();
       if (visitError) throw visitError;
 
-      // Step 3: record all photos in one batch
-      const { error: photosError } = await supabase.from('photos').insert(
-        uploadedPaths.map(({ pos, path }) => ({
-          visit_id: visit.id,
-          position: pos,
-          storage_path: path,
-        }))
-      );
-      if (photosError) {
-        await supabase.from('visits').delete().eq('id', visit.id);
-        throw photosError;
+      // Step 3: record all photos in one batch (skip if every position was
+      // marked N/A — nothing was uploaded, and an empty insert is pointless)
+      if (uploadedPaths.length > 0) {
+        const { error: photosError } = await supabase.from('photos').insert(
+          uploadedPaths.map(({ pos, path }) => ({
+            visit_id: visit.id,
+            position: pos,
+            storage_path: path,
+          }))
+        );
+        if (photosError) {
+          await supabase.from('visits').delete().eq('id', visit.id);
+          throw photosError;
+        }
       }
 
       clearForm();
@@ -260,60 +299,96 @@ export default function NewVisit() {
       <Text style={styles.sectionTitle}>მაღაზია</Text>
       <ShopSelector
         selectedShop={selectedShop}
-        onSelect={setSelectedShop}
-        onClear={() => setSelectedShop(null)}
+        onSelect={shop => {
+          // Ratings/photos/N-A are position data for the PREVIOUS shop —
+          // switching shops without a full reset must not carry them over.
+          setSelectedShop(shop);
+          setRatings({});
+          setPhotos({});
+          setNotApplicable({});
+        }}
+        onClear={() => {
+          setSelectedShop(null);
+          setRatings({});
+          setPhotos({});
+          setNotApplicable({});
+        }}
       />
 
       {/* Ratings + Photos per position */}
       <Text style={[styles.sectionTitle, { marginTop: 24 }]}>შეფასება და ფოტოები</Text>
       {POSITIONS.map(pos => {
         const posPhotos = photos[pos] ?? [];
+        const isNA = !!notApplicable[pos];
         return (
           <View key={pos} style={styles.positionCard}>
             <View style={styles.positionLabelRow}>
               <Text style={styles.positionLabel}>{pos}</Text>
-              <Text style={styles.photoCount}>ფოტო {posPhotos.length}/{MAX_PHOTOS}</Text>
+              {!isNA && <Text style={styles.photoCount}>ფოტო {posPhotos.length}/{MAX_PHOTOS}</Text>}
             </View>
 
-            <View style={styles.ratingRow}>
-              {(['A', 'B'] as Rating[]).map(r => (
-                <TouchableOpacity
-                  key={r}
-                  style={[styles.ratingBtn, ratings[pos] === r && styles.ratingBtnActive]}
-                  onPress={() => setRatings(prev => ({ ...prev, [pos]: r }))}
-                >
-                  <Text style={[styles.ratingBtnText, ratings[pos] === r && styles.ratingBtnTextActive]}>
-                    {r}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.photosRow}
-              keyboardShouldPersistTaps="always"
+            <TouchableOpacity
+              style={[styles.naBar, isNA && styles.naBarActive]}
+              onPress={() => toggleNotApplicable(pos)}
+              activeOpacity={0.8}
             >
-              {posPhotos.map((uri, idx) => (
-                <View key={idx} style={styles.thumbWrapper}>
-                  <Image source={{ uri }} style={styles.thumb} />
-                  <TouchableOpacity
-                    style={styles.removePhotoBtn}
-                    onPress={() => removePhoto(pos, idx)}
-                    hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
-                  >
-                    <Ionicons name="close-circle" size={20} color="#dc2626" />
-                  </TouchableOpacity>
+              <View style={styles.naBarLeft}>
+                <Ionicons name="alert-circle-outline" size={16} color={isNA ? '#fff' : '#7c3aed'} />
+                <Text style={[styles.naBarText, isNA && styles.naBarTextActive]}>ამ მაღაზიას არ აქვს {pos}</Text>
+              </View>
+              <View style={[styles.switchTrack, isNA && styles.switchTrackActive]}>
+                <View style={[styles.switchThumb, isNA && styles.switchThumbActive]} />
+              </View>
+            </TouchableOpacity>
+
+            {isNA ? (
+              <View style={styles.naNotice}>
+                <Ionicons name="information-circle-outline" size={14} color="#888" />
+                <Text style={styles.naNoticeText}>რეიტინგი ავტომატურად აღირიცხება როგორც A</Text>
+              </View>
+            ) : (
+              <>
+                <View style={styles.ratingRow}>
+                  {(['A', 'B'] as Rating[]).map(r => (
+                    <TouchableOpacity
+                      key={r}
+                      style={[styles.ratingBtn, ratings[pos] === r && styles.ratingBtnActive]}
+                      onPress={() => setRatings(prev => ({ ...prev, [pos]: r }))}
+                    >
+                      <Text style={[styles.ratingBtnText, ratings[pos] === r && styles.ratingBtnTextActive]}>
+                        {r}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
-              ))}
-              {posPhotos.length < MAX_PHOTOS && (
-                <TouchableOpacity style={styles.addPhotoBtn} onPress={() => pickPhoto(pos)}>
-                  <Ionicons name="camera-outline" size={24} color="#888" />
-                  <Text style={styles.addPhotoText}>ფოტო</Text>
-                </TouchableOpacity>
-              )}
-            </ScrollView>
+
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.photosRow}
+                  keyboardShouldPersistTaps="always"
+                >
+                  {posPhotos.map((uri, idx) => (
+                    <View key={idx} style={styles.thumbWrapper}>
+                      <Image source={{ uri }} style={styles.thumb} />
+                      <TouchableOpacity
+                        style={styles.removePhotoBtn}
+                        onPress={() => removePhoto(pos, idx)}
+                        hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                      >
+                        <Ionicons name="close-circle" size={20} color="#dc2626" />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                  {posPhotos.length < MAX_PHOTOS && (
+                    <TouchableOpacity style={styles.addPhotoBtn} onPress={() => pickPhoto(pos)}>
+                      <Ionicons name="camera-outline" size={24} color="#888" />
+                      <Text style={styles.addPhotoText}>ფოტო</Text>
+                    </TouchableOpacity>
+                  )}
+                </ScrollView>
+              </>
+            )}
           </View>
         );
       })}
@@ -401,6 +476,30 @@ const styles = StyleSheet.create({
   },
   positionLabel: { fontSize: 15, fontWeight: '700', color: '#1a1a2e' },
   photoCount: { fontSize: 12, color: '#aaa', fontWeight: '600' },
+
+  naBar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10,
+    backgroundColor: '#f5f3ff', borderWidth: 1.5, borderColor: '#7c3aed50',
+    marginBottom: 12,
+  },
+  naBarActive: { backgroundColor: '#7c3aed', borderColor: '#7c3aed' },
+  naBarLeft: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 },
+  naBarText: { fontSize: 13, fontWeight: '700', color: '#7c3aed', flexShrink: 1 },
+  naBarTextActive: { color: '#fff' },
+  switchTrack: {
+    width: 38, height: 22, borderRadius: 11, padding: 2,
+    backgroundColor: '#7c3aed30', justifyContent: 'center',
+  },
+  switchTrackActive: { backgroundColor: 'rgba(255,255,255,0.35)' },
+  switchThumb: {
+    width: 18, height: 18, borderRadius: 9, backgroundColor: '#fff',
+    alignSelf: 'flex-start',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.2, shadowRadius: 2, elevation: 1,
+  },
+  switchThumbActive: { alignSelf: 'flex-end' },
+  naNotice: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
+  naNoticeText: { fontSize: 12, color: '#888', fontStyle: 'italic' },
 
   ratingRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
   ratingBtn: {

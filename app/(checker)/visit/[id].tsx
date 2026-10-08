@@ -70,6 +70,7 @@ export default function VisitDetail() {
   const [createdAt, setCreatedAt] = useState('');
   const [ratings, setRatings] = useState<Partial<Record<Position, Rating>>>({});
   const [photos, setPhotos] = useState<Partial<Record<Position, PhotoEntry[]>>>({});
+  const [notApplicable, setNotApplicable] = useState<Partial<Record<Position, boolean>>>({});
   const [pickerTarget, setPickerTarget] = useState<{ position: Position; index: number | null } | null>(null);
   const [notes, setNotes] = useState('');
   const [checkerName, setCheckerName] = useState('');
@@ -111,11 +112,12 @@ export default function VisitDetail() {
     setNotes(visit.notes ?? '');
     setStatus(visit.status ?? 'pending');
     setRejectionNote(visit.rejection_note ?? null);
-    setRatings({
+    const loadedRatings: Partial<Record<Position, Rating>> = {
       'საწყობი': visit.warehouse_rating,
       'მაცივარი': visit.fridge_rating,
       'თარო': visit.shelf_rating,
-    });
+    };
+    setRatings(loadedRatings);
 
     const { data: photoRows } = await supabase
       .from('photos').select('id, position, storage_path').eq('visit_id', id);
@@ -137,6 +139,16 @@ export default function VisitDetail() {
       });
       setPhotos(state);
     }
+
+    // Infer which positions were originally submitted as "not applicable":
+    // rating A with zero photos is otherwise unreachable, since submitting a
+    // visit has always required a photo per position outside this toggle.
+    const positionsWithPhotos = new Set((photoRows ?? []).map(r => r.position as Position));
+    const inferredNA: Partial<Record<Position, boolean>> = {};
+    POSITIONS.forEach(pos => {
+      if (!positionsWithPhotos.has(pos) && loadedRatings[pos] === 'A') inferredNA[pos] = true;
+    });
+    setNotApplicable(inferredNA);
   }, [id]);
 
   useEffect(() => {
@@ -203,6 +215,46 @@ export default function VisitDetail() {
     });
   }
 
+  function clearPositionPhotos(position: Position) {
+    setPhotos(prev => {
+      const existing = prev[position] ?? [];
+      // Drop locally-added-but-unsaved entries outright; mark already-
+      // persisted ones for deletion so save() actually removes them.
+      const cleared = existing
+        .filter(e => e.id !== null)
+        .map(e => ({ ...e, markedForDelete: true }));
+      return { ...prev, [position]: cleared };
+    });
+  }
+
+  function toggleNotApplicable(position: Position) {
+    const turningOn = !notApplicable[position];
+    const activePhotos = (photos[position] ?? []).filter(e => !e.markedForDelete);
+    const hasData = turningOn && (activePhotos.length > 0 || ratings[position] === 'B');
+
+    const apply = () => {
+      setNotApplicable(prev => ({ ...prev, [position]: turningOn }));
+      setRatings(prev => {
+        const next = { ...prev };
+        if (turningOn) next[position] = 'A'; else delete next[position];
+        return next;
+      });
+      clearPositionPhotos(position);
+    };
+
+    if (!hasData) { apply(); return; }
+
+    const msg = `${position}-ისთვის უკვე შერჩეული რეიტინგი და ფოტოები წაიშლება. გავაგრძელოთ?`;
+    if (Platform.OS === 'web') {
+      if (window.confirm(msg)) apply();
+      return;
+    }
+    Alert.alert('წაიშლება', msg, [
+      { text: 'გაუქმება', style: 'cancel' },
+      { text: 'დიახ', style: 'destructive', onPress: apply },
+    ]);
+  }
+
   async function addPhoto(position: Position) {
     const activeCount = (photos[position] ?? []).filter(e => !e.markedForDelete).length;
     if (activeCount >= MAX_PHOTOS) return;
@@ -259,6 +311,7 @@ export default function VisitDetail() {
     };
     if (!selectedShop) { err('აირჩიეთ მაღაზია'); return; }
     for (const pos of POSITIONS) {
+      if (notApplicable[pos]) continue;
       if (!ratings[pos]) { err(`მონიშნეთ რეიტინგი: ${pos}`); return; }
       const active = (photos[pos] ?? []).filter(e => !e.markedForDelete);
       if (active.length === 0) { err(`${pos}: ერთი ფოტო მინიმუმ საჭიროა`); return; }
@@ -416,81 +469,107 @@ export default function VisitDetail() {
       {POSITIONS.map(pos => {
         const posEntries = photos[pos] ?? [];
         const activeCount = posEntries.filter(e => !e.markedForDelete).length;
+        const isNA = !!notApplicable[pos];
         return (
           <View key={pos} style={styles.positionCard}>
             <View style={styles.positionLabelRow}>
               <Text style={styles.positionLabel}>{pos}</Text>
-              <Text style={styles.photoCount}>ფოტო {activeCount}/{MAX_PHOTOS}</Text>
+              {!isNA && <Text style={styles.photoCount}>ფოტო {activeCount}/{MAX_PHOTOS}</Text>}
             </View>
 
-            <View style={styles.ratingRow}>
-              {(['A', 'B'] as Rating[]).map(r => (
-                <TouchableOpacity
-                  key={r}
-                  style={[styles.ratingBtn, ratings[pos] === r && styles.ratingBtnActive]}
-                  onPress={() => !readOnly && setRatings(prev => ({ ...prev, [pos]: r }))}
-                  activeOpacity={readOnly ? 1 : 0.7}
-                >
-                  <Text style={[styles.ratingBtnText, ratings[pos] === r && styles.ratingBtnTextActive]}>
-                    {r}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            {!readOnly && (
+              <TouchableOpacity
+                style={[styles.naBar, isNA && styles.naBarActive]}
+                onPress={() => toggleNotApplicable(pos)}
+                activeOpacity={0.8}
+              >
+                <View style={styles.naBarLeft}>
+                  <Ionicons name="alert-circle-outline" size={16} color={isNA ? '#fff' : '#7c3aed'} />
+                  <Text style={[styles.naBarText, isNA && styles.naBarTextActive]}>ამ მაღაზიას არ აქვს {pos}</Text>
+                </View>
+                <View style={[styles.switchTrack, isNA && styles.switchTrackActive]}>
+                  <View style={[styles.switchThumb, isNA && styles.switchThumbActive]} />
+                </View>
+              </TouchableOpacity>
+            )}
 
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.photosRow}
-              keyboardShouldPersistTaps="always"
-            >
-              {posEntries.map((entry, rawIdx) => {
-                if (entry.markedForDelete) return null;
-                const activeIdx = posEntries.slice(0, rawIdx + 1).filter(e => !e.markedForDelete).length;
-                return (
-                  <View key={rawIdx} style={styles.thumbWrapper}>
+            {isNA ? (
+              <View style={styles.naNotice}>
+                <Ionicons name="information-circle-outline" size={14} color="#888" />
+                <Text style={styles.naNoticeText}>რეიტინგი ავტომატურად აღირიცხება როგორც A</Text>
+              </View>
+            ) : (
+              <>
+                <View style={styles.ratingRow}>
+                  {(['A', 'B'] as Rating[]).map(r => (
                     <TouchableOpacity
-                      onPress={() => {
-                        setLightboxUri(entry.displayUri);
-                        setLightboxLabel(`${pos} ${activeIdx}/${activeCount}`);
-                      }}
-                      activeOpacity={0.75}
+                      key={r}
+                      style={[styles.ratingBtn, ratings[pos] === r && styles.ratingBtnActive]}
+                      onPress={() => !readOnly && setRatings(prev => ({ ...prev, [pos]: r }))}
+                      activeOpacity={readOnly ? 1 : 0.7}
                     >
-                      <Image source={{ uri: entry.displayUri! }} style={styles.thumb} />
-                      {entry.localUri && !readOnly && (
-                        <View style={styles.changedBadge}>
-                          <Text style={styles.changedBadgeText}>შეცვლილი</Text>
-                        </View>
-                      )}
+                      <Text style={[styles.ratingBtnText, ratings[pos] === r && styles.ratingBtnTextActive]}>
+                        {r}
+                      </Text>
                     </TouchableOpacity>
-                    {!readOnly && (
-                      <>
+                  ))}
+                </View>
+
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.photosRow}
+                  keyboardShouldPersistTaps="always"
+                >
+                  {posEntries.map((entry, rawIdx) => {
+                    if (entry.markedForDelete) return null;
+                    const activeIdx = posEntries.slice(0, rawIdx + 1).filter(e => !e.markedForDelete).length;
+                    return (
+                      <View key={rawIdx} style={styles.thumbWrapper}>
                         <TouchableOpacity
-                          style={styles.editPhotoBtn}
-                          onPress={() => replacePhoto(pos, rawIdx)}
-                          hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                          onPress={() => {
+                            setLightboxUri(entry.displayUri);
+                            setLightboxLabel(`${pos} ${activeIdx}/${activeCount}`);
+                          }}
+                          activeOpacity={0.75}
                         >
-                          <Ionicons name="pencil" size={12} color="#fff" />
+                          <Image source={{ uri: entry.displayUri! }} style={styles.thumb} />
+                          {entry.localUri && !readOnly && (
+                            <View style={styles.changedBadge}>
+                              <Text style={styles.changedBadgeText}>შეცვლილი</Text>
+                            </View>
+                          )}
                         </TouchableOpacity>
-                        <TouchableOpacity
-                          style={styles.removePhotoBtn}
-                          onPress={() => removePhotoEntry(pos, rawIdx)}
-                          hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
-                        >
-                          <Ionicons name="close-circle" size={20} color="#dc2626" />
-                        </TouchableOpacity>
-                      </>
-                    )}
-                  </View>
-                );
-              })}
-              {!readOnly && activeCount < MAX_PHOTOS && (
-                <TouchableOpacity style={styles.addPhotoBtn} onPress={() => addPhoto(pos)}>
-                  <Ionicons name="camera-outline" size={24} color="#888" />
-                  <Text style={styles.addPhotoText}>ფოტო</Text>
-                </TouchableOpacity>
-              )}
-            </ScrollView>
+                        {!readOnly && (
+                          <>
+                            <TouchableOpacity
+                              style={styles.editPhotoBtn}
+                              onPress={() => replacePhoto(pos, rawIdx)}
+                              hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                            >
+                              <Ionicons name="pencil" size={12} color="#fff" />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={styles.removePhotoBtn}
+                              onPress={() => removePhotoEntry(pos, rawIdx)}
+                              hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                            >
+                              <Ionicons name="close-circle" size={20} color="#dc2626" />
+                            </TouchableOpacity>
+                          </>
+                        )}
+                      </View>
+                    );
+                  })}
+                  {!readOnly && activeCount < MAX_PHOTOS && (
+                    <TouchableOpacity style={styles.addPhotoBtn} onPress={() => addPhoto(pos)}>
+                      <Ionicons name="camera-outline" size={24} color="#888" />
+                      <Text style={styles.addPhotoText}>ფოტო</Text>
+                    </TouchableOpacity>
+                  )}
+                </ScrollView>
+              </>
+            )}
           </View>
         );
       })}
@@ -605,6 +684,30 @@ const styles = StyleSheet.create({
   },
   positionLabel: { fontSize: 15, fontWeight: '700', color: '#1a1a2e' },
   photoCount: { fontSize: 12, color: '#aaa', fontWeight: '600' },
+
+  naBar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10,
+    backgroundColor: '#f5f3ff', borderWidth: 1.5, borderColor: '#7c3aed50',
+    marginBottom: 12,
+  },
+  naBarActive: { backgroundColor: '#7c3aed', borderColor: '#7c3aed' },
+  naBarLeft: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 },
+  naBarText: { fontSize: 13, fontWeight: '700', color: '#7c3aed', flexShrink: 1 },
+  naBarTextActive: { color: '#fff' },
+  switchTrack: {
+    width: 38, height: 22, borderRadius: 11, padding: 2,
+    backgroundColor: '#7c3aed30', justifyContent: 'center',
+  },
+  switchTrackActive: { backgroundColor: 'rgba(255,255,255,0.35)' },
+  switchThumb: {
+    width: 18, height: 18, borderRadius: 9, backgroundColor: '#fff',
+    alignSelf: 'flex-start',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.2, shadowRadius: 2, elevation: 1,
+  },
+  switchThumbActive: { alignSelf: 'flex-end' },
+  naNotice: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
+  naNoticeText: { fontSize: 12, color: '#888', fontStyle: 'italic' },
 
   ratingRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
   ratingBtn: {
