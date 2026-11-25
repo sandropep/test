@@ -33,7 +33,11 @@ export function UnvisitedShops() {
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [chainFilter, setChainFilter] = useState<string | null>(null);
   const [checkerFilter, setCheckerFilter] = useState<string | null>(null);
+  // shop_id -> checker_id (from shop_checkers)
   const [checkerByShopId, setCheckerByShopId] = useState<Record<string, string>>({});
+  // checker_id -> full_name, for every user with role 'checker'
+  const [checkerNameById, setCheckerNameById] = useState<Record<string, string>>({});
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const chainUnvisitedCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -51,9 +55,18 @@ export function UnvisitedShops() {
     shops.forEach(s => { const k = checkerKey(s); counts[k] = (counts[k] ?? 0) + 1; });
     return counts;
   }, [shops, checkerKey]);
-  const checkerNames = useMemo(
-    () => Array.from(new Set(shops.map(s => checkerByShopId[s.id]).filter(Boolean))).sort() as string[],
-    [shops, checkerByShopId]
+  // Every checker with at least one assigned shop, including ones whose shops are all
+  // visited (shown as 0/N). Checkers with no assignments (0/0) are left out.
+  // Keyed by id so same-named checkers don't merge.
+  const checkerIds = useMemo(
+    () => Object.keys(checkerNameById)
+      .filter(id => (checkerTotals[id] ?? 0) > 0)
+      .sort((a, b) => checkerNameById[a].localeCompare(checkerNameById[b])),
+    [checkerNameById, checkerTotals]
+  );
+  const checkerLabel = useCallback(
+    (id: string | undefined) => (id ? checkerNameById[id] ?? '' : ''),
+    [checkerNameById]
   );
   const hasUnassigned = (checkerUnvisitedCounts[UNASSIGNED] ?? 0) > 0;
 
@@ -66,17 +79,31 @@ export function UnvisitedShops() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
 
-    const [allShops, visitedIds, assignments] = await Promise.all([
-      // Paginated, since shop count can exceed Supabase's 1000-row default cap.
-      fetchAllRows<Shop>(() =>
-        supabase.from('shops').select('id, shop_number, name, location')
-      ),
-      fetchVisitedShopIdsThisMonth(),
-      fetchAllRows<{ shop_id: string; checker: { full_name: string } | null }>(() =>
-        supabase.from('shop_checkers').select('shop_id, checker:users!checker_id(full_name)')
-      ),
-    ]);
+    let allShops: Shop[], visitedIds: Set<string>,
+      assignments: { shop_id: string; checker_id: string }[],
+      checkers: { id: string; full_name: string | null }[];
+    try {
+      [allShops, visitedIds, assignments, checkers] = await Promise.all([
+        // Paginated (with a stable order) since row counts can exceed Supabase's row cap.
+        fetchAllRows<Shop>(() =>
+          supabase.from('shops').select('id, shop_number, name, location').order('id')
+        ),
+        fetchVisitedShopIdsThisMonth(),
+        fetchAllRows<{ shop_id: string; checker_id: string }>(() =>
+          supabase.from('shop_checkers').select('shop_id, checker_id').order('shop_id')
+        ),
+        fetchAllRows<{ id: string; full_name: string | null }>(() =>
+          supabase.from('users').select('id, full_name').eq('role', 'checker').order('id')
+        ),
+      ]);
+    } catch (e: any) {
+      // Don't show (or export) a partial list as if it were complete.
+      setLoadError(e?.message ?? String(e));
+      setLoading(false);
+      return;
+    }
 
     const unvisited = allShops.filter(s => !visitedIds.has(s.id));
     unvisited.sort((a, b) => a.shop_number.localeCompare(b.shop_number, undefined, { numeric: true }));
@@ -84,8 +111,11 @@ export function UnvisitedShops() {
     const totals: Record<string, number> = {};
     allShops.forEach(s => { totals[s.name] = (totals[s.name] ?? 0) + 1; });
 
+    const nameMap: Record<string, string> = {};
+    checkers.forEach(c => { nameMap[c.id] = c.full_name?.trim() || c.id.slice(0, 8); });
+
     const checkerMap: Record<string, string> = {};
-    assignments.forEach(a => { if (a.checker?.full_name) checkerMap[a.shop_id] = a.checker.full_name; });
+    assignments.forEach(a => { if (nameMap[a.checker_id]) checkerMap[a.shop_id] = a.checker_id; });
 
     const checkerTotalsMap: Record<string, number> = {};
     allShops.forEach(s => {
@@ -97,6 +127,7 @@ export function UnvisitedShops() {
     setChainTotals(totals);
     setCheckerTotals(checkerTotalsMap);
     setCheckerByShopId(checkerMap);
+    setCheckerNameById(nameMap);
     setVisibleCount(PAGE_SIZE);
     setLoading(false);
   }, []);
@@ -106,7 +137,7 @@ export function UnvisitedShops() {
 
   function handleExport() {
     const headers = ['მაღაზია #', 'სახელი', 'მისამართი', 'ჩეკერი'];
-    const rows = filteredShops.map(s => [s.shop_number, s.name, s.location ?? '', checkerByShopId[s.id] ?? '']);
+    const rows = filteredShops.map(s => [s.shop_number, s.name, s.location ?? '', checkerLabel(checkerByShopId[s.id])]);
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'არ მოინახულეს');
@@ -117,6 +148,18 @@ export function UnvisitedShops() {
     return (
       <View style={[styles.container, { alignItems: 'center', paddingVertical: 24 }]}>
         <ActivityIndicator color="#2563eb" />
+      </View>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.sectionTitle}>არ მოინახულეს ამ თვეს</Text>
+        <Text style={styles.emptyText}>მონაცემების ჩატვირთვა ვერ მოხერხდა: {loadError}</Text>
+        <TouchableOpacity style={styles.loadMoreBtn} onPress={load} activeOpacity={0.7}>
+          <Text style={styles.loadMoreText}>თავიდან ცდა</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -181,7 +224,7 @@ export function UnvisitedShops() {
         </>
       )}
 
-      {expanded && (checkerNames.length > 0 || hasUnassigned) && (
+      {expanded && (checkerIds.length > 0 || hasUnassigned) && (
         <>
           <View style={styles.filterLabelRow}>
             <Text style={[styles.filterLabel, { marginTop: 0 }]}>ჩეკერი</Text>
@@ -207,7 +250,7 @@ export function UnvisitedShops() {
             >
               <Text style={[styles.chainPillText, !checkerFilter && styles.chainPillTextActive]}>ყველა</Text>
             </TouchableOpacity>
-            {checkerNames.map(checker => (
+            {checkerIds.map(checker => (
               <TouchableOpacity
                 key={checker}
                 style={[styles.chainPill, checkerFilter === checker && styles.chainPillActive]}
@@ -217,7 +260,7 @@ export function UnvisitedShops() {
                   style={[styles.chainPillText, checkerFilter === checker && styles.chainPillTextActive]}
                   numberOfLines={1}
                 >
-                  {checker} — {checkerUnvisitedCounts[checker] ?? 0}/{checkerTotals[checker] ?? 0}
+                  {checkerLabel(checker)} — {checkerUnvisitedCounts[checker] ?? 0}/{checkerTotals[checker] ?? 0}
                 </Text>
               </TouchableOpacity>
             ))}

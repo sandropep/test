@@ -20,6 +20,7 @@ export async function fetchVisitedShopIdsThisMonth(): Promise<Set<string>> {
       .gte('date', monthStart)
       .lte('date', todayStr)
       .neq('status', 'rejected')
+      .order('id')
   );
   return new Set(rows.map(r => r.shop_id));
 }
