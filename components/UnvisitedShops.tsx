@@ -55,12 +55,14 @@ export function UnvisitedShops() {
     shops.forEach(s => { const k = checkerKey(s); counts[k] = (counts[k] ?? 0) + 1; });
     return counts;
   }, [shops, checkerKey]);
-  // Every checker, including ones with no unvisited (or no assigned) shops, so the
-  // filter always lists the full team. Keyed by id so same-named checkers don't merge.
+  // Every checker with at least one assigned shop, including ones whose shops are all
+  // visited (shown as 0/N). Checkers with no assignments (0/0) are left out.
+  // Keyed by id so same-named checkers don't merge.
   const checkerIds = useMemo(
-    () => Object.keys(checkerNameById).sort((a, b) =>
-      checkerNameById[a].localeCompare(checkerNameById[b])),
-    [checkerNameById]
+    () => Object.keys(checkerNameById)
+      .filter(id => (checkerTotals[id] ?? 0) > 0)
+      .sort((a, b) => checkerNameById[a].localeCompare(checkerNameById[b])),
+    [checkerNameById, checkerTotals]
   );
   const checkerLabel = useCallback(
     (id: string | undefined) => (id ? checkerNameById[id] ?? '' : ''),
